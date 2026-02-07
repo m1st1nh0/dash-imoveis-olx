@@ -31,8 +31,8 @@ Certifique-se de ter o **Python** instalado em sua máquina.
 ### Passo a Passo
 1.  **Clone este repositório:**
     ```bash
-    git clone https://github.com/SEU-USUARIO/NOME-DO-REPO.git
-    cd NOME-DO-REPO
+    git clone  https://github.com/m1st1nh0/dash-imoveis-olx.git
+    cd dash-imoveis-olx
     ```
 
 2.  **Instale as dependências:**
