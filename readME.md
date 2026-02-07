@@ -72,4 +72,4 @@ Este projeto foi desenvolvido para fins de **estudo e portfólio** em Ciência d
 Gostou do projeto? Vamos nos conectar!
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Perfil-blue?style=flat&logo=linkedin)](https://www.linkedin.com/in/lucas-schamposki/)
-```
+
