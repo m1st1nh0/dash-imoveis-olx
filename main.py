@@ -20,6 +20,10 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
 
 if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
+
+  if os.getenv('IS_STREAMLIT_CLOUD'): 
+        st.error("⚠️ O Web Scraping foi desativado nesta demonstração online para evitar bloqueio de IP da OLX.")
+        st.info("Para testar o coletor, clone o repositório e execute localmente em sua máquina.")
     with st.status(f'Coletando dados de {estado_selecionado.upper()}(Até 100 páginas)', expanded=True) as status:
         st.write('Iniciando Scraping')
 
