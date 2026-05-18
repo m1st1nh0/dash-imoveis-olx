@@ -67,16 +67,27 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 # seleção e filtro de dados
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
 
+# controle de fluxo para evitar múltiplos cliques
+if "buscando_dados" not in st.session_state:
+    st.session_state["buscando_dados"] = False
+if "estado_busca" not in st.session_state:
+    st.session_state["estado_busca"] = None
+
 if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
-    with st.status(f'Coletando dados de {estado_selecionado.upper()}(Até 100 páginas)', expanded=True) as status:
+    st.session_state["buscando_dados"] = True
+    st.session_state["estado_busca"] = estado_selecionado
+
+if st.session_state["buscando_dados"]:
+    estado_busca = st.session_state["estado_busca"] or estado_selecionado
+    with st.status(f'Coletando dados de {estado_busca.upper()}(Até 100 páginas)', expanded=True) as status:
         st.write('Iniciando Scraping')
 
-        df = scrape(estado_selecionado)
+        df = scrape(estado_busca)
 
         if df is not None and not df.empty:
             st.write('Processando preços por m² ...')
             df = calcular_preco_m2(df)
-            df['estado'] = estado_selecionado
+            df['estado'] = estado_busca
             df['user_id'] = user.id
             df['criado_em'] = datetime.now(timezone.utc).isoformat()
 
@@ -91,15 +102,18 @@ if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
             df = df.where(pd.notna(df), None)
 
             try:
-                supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_selecionado).execute()
+                supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_busca).execute()
                 supabase.table('imoveis').insert(df.to_dict(orient='records')).execute()
                 status.update(label='Concluído!', state='complete', expanded=False)
+                st.session_state["buscando_dados"] = False
                 st.rerun()
             except Exception as e:
                 status.update(label='Erro ao salvar no banco.', state='error')
+                st.session_state["buscando_dados"] = False
                 st.error(f'Erro ao salvar no Supabase: {e}')
         else:
             status.update(label="Erro ou nenhum dado encontrado.", state="error")
+            st.session_state["buscando_dados"] = False
 
 try:
     resposta = supabase.table('imoveis').select('*').eq('user_id', user.id).eq('estado', estado_selecionado).execute()
@@ -168,7 +182,8 @@ try:
         else:
             st.warning("Nenhum dado encontrado para essa combinação de filtros.")
     else:
-        st.info('👈 Selecione um estado na barra lateral e clique em "Buscar Dados" para começar.')
+        if not st.session_state.get("buscando_dados"):
+            st.info('👈 Selecione um estado na barra lateral e clique em "Buscar Dados" para começar.')
 except Exception as e:
     st.error(f'Erro ao consultar dados no Supabase: {e}')
 
