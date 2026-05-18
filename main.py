@@ -85,10 +85,10 @@ if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
             df['preco_num'] = pd.to_numeric(df['preco_num'], errors='coerce')
             df['preco_m2'] = pd.to_numeric(df['preco_m2'], errors='coerce')
 
-            # Limpa NaN/Inf e converte para tipos Python (JSON válido)
+            # Remove NaN/Inf de forma confiável para JSON
             df = df.replace([np.inf, -np.inf], np.nan)
-            df = df.where(pd.notnull(df), None)
             df = df.astype(object)
+            df = df.applymap(lambda x: None if pd.isna(x) else x)
 
             try:
                 supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_selecionado).execute()
