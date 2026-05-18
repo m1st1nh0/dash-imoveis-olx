@@ -164,20 +164,20 @@ try:
             col1.metric("Total de Imóveis", len(tabela_final))
 
             if 'preco_m2' in tabela_final.columns:
-                media_selecao = tabela_final['preco_m2'].mean()
-                col2.metric('Média Preço/m² (Seleção)', f'R$ {media_selecao:.2f}')
+                mediana_selecao = tabela_final['preco_m2'].median()
+                col2.metric('Mediana Preço/m² (Seleção)', f'R$ {mediana_selecao:.2f}')
             # Graficos
 
             if 'preco_num' in tabela_final.columns:
-                media_preco = tabela_final['preco_num'].mean()
-                col3.metric("Preço Médio do Imóvel", f"R$ {media_preco:,.2f}")
+                mediana_preco = tabela_final['preco_num'].median()
+                col3.metric("Preço Mediano do Imóvel", f"R$ {mediana_preco:,.2f}")
 
             st.subheader('visualização Gráfica')
             tab1, tab2 = st.tabs(['📊 Gráficos', "📄 Dados Detalhados"])
 
             with tab1:
                 st.caption(f'Exibindo {titulo_grafico}')
-                dados_agrupados = tabela_final.groupby('bairro')['preco_m2'].mean().sort_values(ascending=False)
+                dados_agrupados = tabela_final.groupby('bairro')['preco_m2'].median().sort_values(ascending=False)
 
                 if not filtro_bairros:
                     dados_grafico_exibir = dados_agrupados.head(15)
