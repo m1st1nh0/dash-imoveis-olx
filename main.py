@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from supabase import create_client
@@ -78,7 +79,10 @@ if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
             df['estado'] = estado_selecionado
             df['user_id'] = user.id
             df['criado_em'] = datetime.now(timezone.utc).isoformat()
-            df = df.where(pd.notnull(df), None)
+
+            # Limpa NaN/Inf para evitar erro de JSON no Supabase
+            df = df.replace([np.nan, np.inf, -np.inf], None)
+            df = df.astype(object)
 
             try:
                 supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_selecionado).execute()
