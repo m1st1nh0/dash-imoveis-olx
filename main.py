@@ -110,6 +110,20 @@ if st.session_state["buscando_dados"]:
                 try:
                     supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_busca).execute()
                     supabase.table('imoveis').insert(df.to_dict(orient='records')).execute()
+
+                    resumo_pesquisa = {
+                        "user_id": user.id,
+                        "estado": estado_busca,
+                        "criado_em": datetime.now(timezone.utc).isoformat(),
+                        "qtd_anuncios": int(len(df)),
+                        "mediana_preco_m2": float(df['preco_m2'].median()) if 'preco_m2' in df.columns else None,
+                        "mediana_preco_total": float(df['preco_num'].median()) if 'preco_num' in df.columns else None,
+                    }
+                    try:
+                        supabase.table('pesquisas').insert(resumo_pesquisa).execute()
+                    except Exception as historico_erro:
+                        st.warning(f'Não foi possível salvar o histórico da pesquisa: {historico_erro}')
+
                     status.update(label='Concluído!', state='complete', expanded=False)
                     st.session_state["buscando_dados"] = False
                     st.rerun()
@@ -416,6 +430,56 @@ try:
                         st.info('Histórico ainda não disponível. Faça coletas em dias diferentes para comparar.')
                 else:
                     st.info('Histórico indisponível: campo criado_em não encontrado.')
+
+            st.subheader('Histórico de Pesquisas')
+            try:
+                historico_pesquisas = (
+                    supabase.table('pesquisas')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('criado_em', desc=True)
+                    .execute()
+                )
+                dados_pesquisas = historico_pesquisas.data or []
+                if dados_pesquisas:
+                    df_pesquisas = pd.DataFrame(dados_pesquisas)
+                    df_pesquisas['criado_em'] = pd.to_datetime(df_pesquisas['criado_em'], errors='coerce')
+                    df_pesquisas = df_pesquisas.dropna(subset=['criado_em'])
+
+                    if not df_pesquisas.empty:
+                        df_grafico = df_pesquisas.sort_values('criado_em')
+                        col_hist1, col_hist2 = st.columns(2)
+                        with col_hist1:
+                            st.caption('Evolução das medianas por pesquisa')
+                            colunas_grafico = []
+                            if 'mediana_preco_m2' in df_grafico.columns:
+                                colunas_grafico.append('mediana_preco_m2')
+                            if 'mediana_preco_total' in df_grafico.columns:
+                                colunas_grafico.append('mediana_preco_total')
+                            if colunas_grafico:
+                                st.line_chart(df_grafico.set_index('criado_em')[colunas_grafico])
+
+                        with col_hist2:
+                            st.caption('Quantidade de anúncios por pesquisa')
+                            if 'qtd_anuncios' in df_grafico.columns:
+                                st.line_chart(df_grafico.set_index('criado_em')[['qtd_anuncios']])
+
+                    st.dataframe(
+                        df_pesquisas.sort_values('criado_em', ascending=False),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            'criado_em': st.column_config.TextColumn('Data'),
+                            'estado': st.column_config.TextColumn('Estado'),
+                            'qtd_anuncios': st.column_config.NumberColumn('Anúncios', format='%d'),
+                            'mediana_preco_m2': st.column_config.NumberColumn('Mediana R$/m²', format='%.2f'),
+                            'mediana_preco_total': st.column_config.NumberColumn('Mediana Preço (R$)', format='%.2f'),
+                        }
+                    )
+                else:
+                    st.info('Ainda não há histórico de pesquisas para este usuário.')
+            except Exception as historico_pesquisa_erro:
+                st.info(f'Histórico de pesquisas indisponível: {historico_pesquisa_erro}')
 
             st.subheader('visualização Gráfica')
             tab1, tab2 = st.tabs(['📊 Gráficos', "📄 Dados Detalhados"])
