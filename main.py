@@ -142,6 +142,40 @@ try:
                 tabela_filtrada = tabela[tabela['cidade'].isin(filtro_cidade)]
             else:
                 tabela_filtrada = tabela
+
+            if 'preco_num' in tabela_filtrada.columns:
+                valores_preco = tabela_filtrada['preco_num'].dropna()
+                if not valores_preco.empty:
+                    minimo_preco = float(valores_preco.min())
+                    maximo_preco = float(valores_preco.max())
+                    if minimo_preco < maximo_preco:
+                        faixa_preco = st.slider(
+                            'Preço do imóvel (R$)',
+                            min_value=minimo_preco,
+                            max_value=maximo_preco,
+                            value=(minimo_preco, maximo_preco),
+                            step=max((maximo_preco - minimo_preco) / 100, 1.0)
+                        )
+                        tabela_filtrada = tabela_filtrada[
+                            tabela_filtrada['preco_num'].between(faixa_preco[0], faixa_preco[1])
+                        ]
+
+            if 'preco_m2' in tabela_filtrada.columns:
+                valores_m2 = tabela_filtrada['preco_m2'].dropna()
+                if not valores_m2.empty:
+                    minimo_m2 = float(valores_m2.min())
+                    maximo_m2 = float(valores_m2.max())
+                    if minimo_m2 < maximo_m2:
+                        faixa_m2 = st.slider(
+                            'Preço por m² (R$)',
+                            min_value=minimo_m2,
+                            max_value=maximo_m2,
+                            value=(minimo_m2, maximo_m2),
+                            step=max((maximo_m2 - minimo_m2) / 100, 1.0)
+                        )
+                        tabela_filtrada = tabela_filtrada[
+                            tabela_filtrada['preco_m2'].between(faixa_m2[0], faixa_m2[1])
+                        ]
         with col_filtro2:
             # filtro cidades
             bairros_diponiveis = sorted(tabela_filtrada['bairro'].unique().astype(str))
@@ -149,7 +183,7 @@ try:
 
             # aplicar filtro bairros ou não
             if filtro_bairros:
-                tabela_final = tabela_filtrada[tabela['bairro'].isin(filtro_bairros)]
+                tabela_final = tabela_filtrada[tabela_filtrada['bairro'].isin(filtro_bairros)]
                 titulo_grafico = "Comparativo dos Bairros Selecionados"
             else:
                 tabela_final = tabela_filtrada
@@ -171,6 +205,84 @@ try:
             if 'preco_num' in tabela_final.columns:
                 mediana_preco = tabela_final['preco_num'].median()
                 col3.metric("Preço Mediano do Imóvel", f"R$ {mediana_preco:,.2f}")
+
+            st.subheader('Insights & Qualidade dos Dados')
+            insight_tab1, insight_tab2, insight_tab3 = st.tabs([
+                '🏙️ Ranking',
+                '💡 Oportunidades',
+                '✅ Qualidade'
+            ])
+
+            with insight_tab1:
+                col_rank1, col_rank2 = st.columns(2)
+
+                with col_rank1:
+                    st.caption('Top cidades por volume de anúncios')
+                    ranking_cidades = (
+                        tabela.groupby('cidade')
+                        .size()
+                        .sort_values(ascending=False)
+                        .head(10)
+                    )
+                    st.bar_chart(ranking_cidades)
+
+                with col_rank2:
+                    st.caption('Cidades com maior preço mediano por m²')
+                    ranking_preco_cidades = (
+                        tabela.groupby('cidade')['preco_m2']
+                        .median()
+                        .sort_values(ascending=False)
+                        .head(10)
+                    )
+                    st.bar_chart(ranking_preco_cidades)
+
+                st.caption('Bairros com maior volume (seleção atual)')
+                ranking_bairros = (
+                    tabela_final.groupby('bairro')
+                    .size()
+                    .sort_values(ascending=False)
+                    .head(15)
+                    .rename('anuncios')
+                    .reset_index()
+                )
+                st.dataframe(ranking_bairros, use_container_width=True, hide_index=True)
+
+            with insight_tab2:
+                st.caption('Bairros com preço/m² abaixo da mediana da cidade')
+                bairro_mediana = tabela.groupby(['cidade', 'bairro'])['preco_m2'].median().reset_index()
+                cidade_mediana = tabela.groupby('cidade')['preco_m2'].median().rename('mediana_cidade')
+                oportunidades = bairro_mediana.merge(cidade_mediana, on='cidade', how='left')
+                oportunidades['diff_percentual'] = (
+                    (oportunidades['preco_m2'] - oportunidades['mediana_cidade'])
+                    / oportunidades['mediana_cidade']
+                ) * 100
+                oportunidades = oportunidades.sort_values('diff_percentual').head(15)
+                oportunidades['diff_percentual'] = oportunidades['diff_percentual'].round(2)
+                st.dataframe(
+                    oportunidades,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        'cidade': st.column_config.TextColumn('Cidade'),
+                        'bairro': st.column_config.TextColumn('Bairro'),
+                        'preco_m2': st.column_config.NumberColumn('Mediana Bairro (R$/m²)', format='%.2f'),
+                        'mediana_cidade': st.column_config.NumberColumn('Mediana Cidade (R$/m²)', format='%.2f'),
+                        'diff_percentual': st.column_config.NumberColumn('Diferença %', format='%.2f'),
+                    }
+                )
+
+            with insight_tab3:
+                total_registros = len(tabela_final)
+                if total_registros > 0:
+                    col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+                    faltando_m2 = tabela_final['m2'].isna().mean() * 100 if 'm2' in tabela_final.columns else 0
+                    faltando_bairro = tabela_final['bairro'].isna().mean() * 100 if 'bairro' in tabela_final.columns else 0
+                    faltando_cidade = tabela_final['cidade'].isna().mean() * 100 if 'cidade' in tabela_final.columns else 0
+                    faltando_preco = tabela_final['preco_num'].isna().mean() * 100 if 'preco_num' in tabela_final.columns else 0
+                    col_q1.metric('% sem m²', f'{faltando_m2:.1f}%')
+                    col_q2.metric('% sem bairro', f'{faltando_bairro:.1f}%')
+                    col_q3.metric('% sem cidade', f'{faltando_cidade:.1f}%')
+                    col_q4.metric('% sem preço', f'{faltando_preco:.1f}%')
 
             st.subheader('visualização Gráfica')
             tab1, tab2 = st.tabs(['📊 Gráficos', "📄 Dados Detalhados"])
@@ -214,6 +326,14 @@ try:
                         "estado": st.column_config.TextColumn("UF"),
                         "link": st.column_config.LinkColumn("Link"),
                     },
+                )
+
+                csv_export = tabela_exibir.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label='⬇️ Baixar CSV filtrado',
+                    data=csv_export,
+                    file_name='imoveis_filtrados.csv',
+                    mime='text/csv'
                 )
 
         else:
