@@ -2,7 +2,6 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import re
 import pandas as pd
-import math
 
 
 def scrape(estado):
@@ -13,11 +12,6 @@ def scrape(estado):
     dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': []}
     for i in range(1, 100):
         url = f'https://www.olx.com.br/imoveis/venda/estado-{estado}?lis=home_body_search_bar_1001&o={i}'
-
-
-
-
-
 
         try:
             response = scraper.get(url, headers=headers)
@@ -31,21 +25,20 @@ def scrape(estado):
 
             for produto in produtos:
                 try:
-                    #pegar nome
-
+                    # pegar nome
                     nome_tag = produto.find('h2', class_=re.compile('olx-adcard__title'))
                     if not nome_tag:
                         continue
                     nome = nome_tag.get_text().strip()
 
-                    #pegar preço
+                    # pegar preço
                     preco_tag = (produto.find('h3', class_=re.compile('olx-adcard__price')))
                     if preco_tag:
                         preco = preco_tag.get_text().strip()
                     else:
                         preco = "0"
 
-                    #pegar m²
+                    # pegar m²
                     m2_div = produto.find('div', attrs={'aria-label': re.compile('metros')})
                     if m2_div:
                         texto_m2 = m2_div.get('aria-label')
@@ -53,12 +46,12 @@ def scrape(estado):
                     else:
                         m2 = None
 
-                    #pegar localização
+                    # pegar localização
                     localizacao_tag = (produto.find('p', class_=re.compile('location')))
                     localizacao = localizacao_tag.get_text().strip() if localizacao_tag else ""
                     if localizacao:
                         cidade_bairro = localizacao.split(',')
-                        if len(cidade_bairro)>=2:
+                        if len(cidade_bairro) >= 2:
                             cidade = cidade_bairro[0]
                             bairro = cidade_bairro[1]
                         elif '-' in cidade_bairro:
@@ -72,11 +65,11 @@ def scrape(estado):
                         cidade = "Não Informado"
                         bairro = "Não Informado"
 
-                    #pegar link
-                    link_tag = (produto.find('a',class_=re.compile('link')))
+                    # pegar link
+                    link_tag = (produto.find('a', class_=re.compile('link')))
                     link = link_tag.get('href') if link_tag else ""
 
-                    #adicionar a lista
+                    # adicionar a lista
                     dic_produtos['nome'].append(nome)
                     dic_produtos['preco'].append(preco)
                     dic_produtos['m2'].append(m2)
@@ -92,23 +85,6 @@ def scrape(estado):
             continue
 
     if len(dic_produtos['nome']) > 0:
-        df = pd.DataFrame(dic_produtos)
-        df.to_csv('dados.csv', encoding='utf-8', sep=';', index=False, quoting=1)
-        return True
+        return pd.DataFrame(dic_produtos)
 
-    return False
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    return None
