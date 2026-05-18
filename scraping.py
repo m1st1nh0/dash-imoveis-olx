@@ -10,7 +10,7 @@ def scrape(estado):
     }
     scraper = cloudscraper.create_scraper()
     dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': []}
-    for i in range(1, 100):
+    for i in range(1, 3):
         url = f'https://www.olx.com.br/imoveis/venda/estado-{estado}?lis=home_body_search_bar_1001&o={i}'
 
         try:
