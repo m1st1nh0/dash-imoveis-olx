@@ -131,7 +131,10 @@ try:
 
         with col_filtro1:
             # filtro cidades
-            cidades_no_arquivo = sorted(tabela['cidade'].unique().astype(str))
+            contagem_cidades = tabela['cidade'].astype(str).value_counts()
+            top_10_cidades = contagem_cidades.head(10).index.tolist()
+            todas_cidades = sorted(tabela['cidade'].unique().astype(str))
+            cidades_no_arquivo = top_10_cidades + todas_cidades
             filtro_cidade = st.multiselect('1. Selecione a cidade', cidades_no_arquivo)
 
             # aplicar filtro cidade
