@@ -284,6 +284,139 @@ try:
                     col_q3.metric('% sem cidade', f'{faltando_cidade:.1f}%')
                     col_q4.metric('% sem preço', f'{faltando_preco:.1f}%')
 
+            st.subheader('Análises Avançadas')
+            avanc_tab1, avanc_tab2, avanc_tab3 = st.tabs([
+                '🧩 Segmentação',
+                '🚩 Anúncios suspeitos',
+                '📈 Histórico'
+            ])
+
+            with avanc_tab1:
+                st.caption('Segmentação simples por faixa de preço/m² (quantis)')
+                tabela_segmento = tabela_final.copy()
+                if 'preco_m2' in tabela_segmento.columns:
+                    valores_segmento = tabela_segmento['preco_m2'].dropna()
+                    if valores_segmento.nunique() >= 3:
+                        tabela_segmento['segmento'] = pd.qcut(
+                            tabela_segmento['preco_m2'],
+                            q=3,
+                            labels=['Baixo', 'Médio', 'Alto']
+                        )
+                        resumo_segmento = (
+                            tabela_segmento.groupby('segmento')
+                            .agg(
+                                anuncios=('segmento', 'size'),
+                                mediana_m2=('preco_m2', 'median'),
+                                mediana_preco=('preco_num', 'median')
+                            )
+                            .reset_index()
+                        )
+                        st.dataframe(
+                            resumo_segmento,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                'segmento': st.column_config.TextColumn('Segmento'),
+                                'anuncios': st.column_config.NumberColumn('Anúncios'),
+                                'mediana_m2': st.column_config.NumberColumn('Mediana R$/m²', format='%.2f'),
+                                'mediana_preco': st.column_config.NumberColumn('Mediana Preço (R$)', format='%.2f'),
+                            }
+                        )
+                    else:
+                        st.info('Pouca variação para segmentar os dados.')
+                else:
+                    st.info('Preço por m² indisponível para segmentação.')
+
+            with avanc_tab2:
+                st.caption('Detecção simples de outliers por quantis')
+                suspeitos = tabela_final.copy()
+                suspeitos['motivo'] = ''
+
+                if 'preco_m2' in suspeitos.columns:
+                    p05_m2 = suspeitos['preco_m2'].quantile(0.05)
+                    p95_m2 = suspeitos['preco_m2'].quantile(0.95)
+                    suspeitos.loc[suspeitos['preco_m2'] < p05_m2, 'motivo'] += 'Preço/m² muito baixo; '
+                    suspeitos.loc[suspeitos['preco_m2'] > p95_m2, 'motivo'] += 'Preço/m² muito alto; '
+
+                if 'preco_num' in suspeitos.columns:
+                    p05_preco = suspeitos['preco_num'].quantile(0.05)
+                    p95_preco = suspeitos['preco_num'].quantile(0.95)
+                    suspeitos.loc[suspeitos['preco_num'] < p05_preco, 'motivo'] += 'Preço total muito baixo; '
+                    suspeitos.loc[suspeitos['preco_num'] > p95_preco, 'motivo'] += 'Preço total muito alto; '
+
+                if 'm2' in suspeitos.columns:
+                    p05_area = suspeitos['m2'].quantile(0.05)
+                    p95_area = suspeitos['m2'].quantile(0.95)
+                    suspeitos.loc[suspeitos['m2'] < p05_area, 'motivo'] += 'Área muito baixa; '
+                    suspeitos.loc[suspeitos['m2'] > p95_area, 'motivo'] += 'Área muito alta; '
+
+                suspeitos = suspeitos[suspeitos['motivo'].str.strip() != '']
+                suspeitos = suspeitos.head(20)
+
+                if not suspeitos.empty:
+                    st.dataframe(
+                        suspeitos[[
+                            'nome',
+                            'cidade',
+                            'bairro',
+                            'm2',
+                            'preco_num',
+                            'preco_m2',
+                            'motivo',
+                            'link'
+                        ]],
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            'nome': st.column_config.TextColumn('Imóvel'),
+                            'cidade': st.column_config.TextColumn('Cidade'),
+                            'bairro': st.column_config.TextColumn('Bairro'),
+                            'm2': st.column_config.NumberColumn('m²', format='%d'),
+                            'preco_num': st.column_config.NumberColumn('Preço (R$)', format='%.2f'),
+                            'preco_m2': st.column_config.NumberColumn('Preço/m² (R$)', format='%.2f'),
+                            'motivo': st.column_config.TextColumn('Motivo'),
+                            'link': st.column_config.LinkColumn('Link'),
+                        }
+                    )
+                else:
+                    st.info('Nenhum anúncio suspeito identificado com os critérios atuais.')
+
+            with avanc_tab3:
+                if 'criado_em' in tabela.columns:
+                    historico = tabela.copy()
+                    historico['criado_em'] = pd.to_datetime(historico['criado_em'], errors='coerce')
+                    historico = historico.dropna(subset=['criado_em'])
+                    historico['dia'] = historico['criado_em'].dt.date
+
+                    if historico['dia'].nunique() > 1:
+                        historico_agg = (
+                            historico.groupby('dia')
+                            .agg(
+                                mediana_m2=('preco_m2', 'median'),
+                                mediana_preco=('preco_num', 'median'),
+                                anuncios=('dia', 'size')
+                            )
+                            .reset_index()
+                        )
+                        st.line_chart(
+                            historico_agg.set_index('dia')[['mediana_m2', 'mediana_preco']]
+                        )
+                        st.dataframe(
+                            historico_agg,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                'dia': st.column_config.TextColumn('Dia'),
+                                'mediana_m2': st.column_config.NumberColumn('Mediana R$/m²', format='%.2f'),
+                                'mediana_preco': st.column_config.NumberColumn('Mediana Preço (R$)', format='%.2f'),
+                                'anuncios': st.column_config.NumberColumn('Anúncios'),
+                            }
+                        )
+                    else:
+                        st.info('Histórico ainda não disponível. Faça coletas em dias diferentes para comparar.')
+                else:
+                    st.info('Histórico indisponível: campo criado_em não encontrado.')
+
             st.subheader('visualização Gráfica')
             tab1, tab2 = st.tabs(['📊 Gráficos', "📄 Dados Detalhados"])
 
