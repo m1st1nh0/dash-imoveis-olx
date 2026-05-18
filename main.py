@@ -186,7 +186,35 @@ try:
                 st.bar_chart(dados_grafico_exibir)
 
             with tab2:
-                st.dataframe(tabela_final, use_container_width=True)
+                colunas_ocultar = {"id", "user_id", "criado_em"}
+                colunas_exibir = [col for col in tabela_final.columns if col not in colunas_ocultar]
+                tabela_exibir = tabela_final[colunas_exibir].copy()
+
+                if "preco_num" in tabela_exibir.columns:
+                    tabela_exibir["preco_num"] = tabela_exibir["preco_num"].apply(
+                        lambda valor: f"R$ {valor:,.2f}" if pd.notna(valor) else ""
+                    )
+                if "preco_m2" in tabela_exibir.columns:
+                    tabela_exibir["preco_m2"] = tabela_exibir["preco_m2"].apply(
+                        lambda valor: f"R$ {valor:,.2f}" if pd.notna(valor) else ""
+                    )
+
+                st.dataframe(
+                    tabela_exibir,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "nome": st.column_config.TextColumn("Imóvel"),
+                        "preco": st.column_config.TextColumn("Preço"),
+                        "preco_num": st.column_config.TextColumn("Preço Num."),
+                        "preco_m2": st.column_config.TextColumn("Preço/m²"),
+                        "m2": st.column_config.NumberColumn("m²", format="%d"),
+                        "cidade": st.column_config.TextColumn("Cidade"),
+                        "bairro": st.column_config.TextColumn("Bairro"),
+                        "estado": st.column_config.TextColumn("UF"),
+                        "link": st.column_config.LinkColumn("Link"),
+                    },
+                )
 
         else:
             st.warning("Nenhum dado encontrado para essa combinação de filtros.")
