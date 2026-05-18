@@ -1,51 +1,55 @@
 import os.path
-from supabase import create_client
+
 import streamlit as st
 import pandas as pd
+from supabase import create_client
 from scraping import scrape
 from calcular_preco_m2 import calcular_preco_m2
 
-
-
 supabase = create_client(
-  st.secrets["SUPABASE_URL"]
-  st.secrets["SUPABASE_ANON_KEY"]
+    st.secrets["SUPABASE_URL"],
+    st.secrets["SUPABASE_ANON_KEY"]
 )
+
+
 def auth_screen():
-  st.title("Login")
-  tab_login, tab_singup = st.tabs(["Entrar", "Cadastrar"])
-  with tab_login:
-    email = st.text_input("Email", key="login_emal")
-    password = st.text_input("Senha", type="password", key="login_pass")
-    if st.button("Entrar"):
-      try:
-        res = supabase.auth.sing_in_with_password({
-          "email": email,
-          "password": password
-        })
-        st.session_state["user"] =  res.user
-        st.success("Login Realizado!")
-        st.return()
-      except Exception as e:
-        st.error("Erro ao realizar login")
-    with tab_singup:
-      
-      email = st.text_input("Email", key="login_emal")
-      password = st.text_input("Senha", type="password", key="login_pass")
-      if st.button("Cadastrar"):
-        try:
-          supabase.auth.sing_up({
-            "email": email,
-            "password": password
-          })
-          st.success("Conta criada! Realize o login")
-          except Exception as e:
-            st.error("Erro ao cadastrar")
-            
-  if "user" not in st.session_state:
+    st.title("🔐 Login")
+    tab_login, tab_signup = st.tabs(["Entrar", "Cadastrar"])
+
+    with tab_login:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Senha", type="password", key="login_pass")
+        if st.button("Entrar"):
+            try:
+                res = supabase.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
+                st.session_state["user"] = res.user
+                st.success("Login realizado!")
+                st.rerun()
+            except Exception:
+                st.error("Erro ao realizar login")
+
+    with tab_signup:
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Senha", type="password", key="signup_pass")
+        if st.button("Cadastrar"):
+            try:
+                supabase.auth.sign_up({
+                    "email": email,
+                    "password": password
+                })
+                st.success("Conta criada! Realize o login.")
+            except Exception:
+                st.error("Erro ao cadastrar")
+
+
+if "user" not in st.session_state:
     auth_screen()
     st.stop()
-          
+
+st.set_page_config(page_title="Dashboard", layout="wide")
 
 # título
 st.title('📊 Dashboard Imobiliário OLX')
