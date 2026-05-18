@@ -1,10 +1,13 @@
-import os.path
+from datetime import datetime, timezone
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
 from supabase import create_client
+
 from scraping import scrape
 from calcular_preco_m2 import calcular_preco_m2
+
+st.set_page_config(page_title="Dashboard", layout="wide")
 
 supabase = create_client(
     st.secrets["SUPABASE_URL"],
@@ -49,7 +52,7 @@ if "user" not in st.session_state:
     auth_screen()
     st.stop()
 
-st.set_page_config(page_title="Dashboard", layout="wide")
+user = st.session_state["user"]
 
 # título
 st.title('📊 Dashboard Imobiliário OLX')
@@ -64,24 +67,35 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
 
 if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
-
-  
-  with st.status(f'Coletando dados de {estado_selecionado.upper()}(Até 100 páginas)', expanded=True) as status:
+    with st.status(f'Coletando dados de {estado_selecionado.upper()}(Até 100 páginas)', expanded=True) as status:
         st.write('Iniciando Scraping')
 
-        sucesso = scrape(estado_selecionado)
+        df = scrape(estado_selecionado)
 
-        if sucesso:
+        if df is not None and not df.empty:
             st.write('Processando preços por m² ...')
-            calcular_preco_m2()
-            status.update(label='Concluído!', state='complete', expanded=False)
-            st.rerun()
+            df = calcular_preco_m2(df)
+            df['estado'] = estado_selecionado
+            df['user_id'] = user.id
+            df['criado_em'] = datetime.now(timezone.utc).isoformat()
+            df = df.where(pd.notnull(df), None)
+
+            try:
+                supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_selecionado).execute()
+                supabase.table('imoveis').insert(df.to_dict(orient='records')).execute()
+                status.update(label='Concluído!', state='complete', expanded=False)
+                st.rerun()
+            except Exception as e:
+                status.update(label='Erro ao salvar no banco.', state='error')
+                st.error(f'Erro ao salvar no Supabase: {e}')
         else:
             status.update(label="Erro ou nenhum dado encontrado.", state="error")
 
-if os.path.exists('dados.csv'):
-    try:
-        tabela = pd.read_csv('dados.csv', sep=';', encoding='utf-8')
+try:
+    resposta = supabase.table('imoveis').select('*').eq('user_id', user.id).eq('estado', estado_selecionado).execute()
+    dados = resposta.data or []
+    if dados:
+        tabela = pd.DataFrame(dados)
         st.subheader('Filtros da Análise')
         col_filtro1, col_filtro2 = st.columns(2)
 
@@ -143,9 +157,9 @@ if os.path.exists('dados.csv'):
 
         else:
             st.warning("Nenhum dado encontrado para essa combinação de filtros.")
-    except Exception as e:
-        st.error(f'Erro ao ler arquivo CSV: {e}')
-else:
-    st.info('👈 Selecione um estado na barra lateral e clique em "Buscar Dados" para começar.')
+    else:
+        st.info('👈 Selecione um estado na barra lateral e clique em "Buscar Dados" para começar.')
+except Exception as e:
+    st.error(f'Erro ao consultar dados no Supabase: {e}')
 
 # 2 metricas
