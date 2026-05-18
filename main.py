@@ -80,8 +80,14 @@ if st.sidebar.button(f'Buscar dados em {estado_selecionado.upper()}'):
             df['user_id'] = user.id
             df['criado_em'] = datetime.now(timezone.utc).isoformat()
 
-            # Limpa NaN/Inf para evitar erro de JSON no Supabase
-            df = df.replace([np.nan, np.inf, -np.inf], None)
+            # Tipos numéricos coerentes com o banco
+            df['m2'] = pd.to_numeric(df['m2'], errors='coerce').round(0).astype('Int64')
+            df['preco_num'] = pd.to_numeric(df['preco_num'], errors='coerce')
+            df['preco_m2'] = pd.to_numeric(df['preco_m2'], errors='coerce')
+
+            # Limpa NaN/Inf e converte para tipos Python (JSON válido)
+            df = df.replace([np.inf, -np.inf], np.nan)
+            df = df.where(pd.notnull(df), None)
             df = df.astype(object)
 
             try:
