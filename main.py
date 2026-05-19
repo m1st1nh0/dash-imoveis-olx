@@ -5,9 +5,6 @@ import pandas as pd
 import streamlit as st
 from supabase import create_client
 
-from scraping import scrape
-from calcular_preco_m2 import calcular_preco_m2
-
 st.set_page_config(page_title="Dashboard", layout="wide")
 
 supabase = create_client(
@@ -56,7 +53,8 @@ if "user" not in st.session_state:
 user = st.session_state["user"]
 
 # título
-st.title('📊 Dashboard Imobiliário OLX')
+st.title('📊 Dashboard Imobiliário')
+st.caption("Dados atualizados automaticamente de hora em hora via coleta agendada.")
 
 # Lateral
 st.sidebar.header('Configurações da Coleta')
@@ -66,74 +64,6 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 
 # seleção e filtro de dados
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
-
-# controle de fluxo para evitar múltiplos cliques
-if "buscando_dados" not in st.session_state:
-    st.session_state["buscando_dados"] = False
-if "estado_busca" not in st.session_state:
-    st.session_state["estado_busca"] = None
-
-if st.sidebar.button(
-    f'Buscar dados em {estado_selecionado.upper()}',
-    disabled=st.session_state["buscando_dados"],
-    help="Aguarde a coleta terminar para iniciar uma nova busca.",
-):
-    st.session_state["buscando_dados"] = True
-    st.session_state["estado_busca"] = estado_selecionado
-
-if st.session_state["buscando_dados"]:
-    estado_busca = st.session_state["estado_busca"] or estado_selecionado
-    st.info("🔄 Coleta em andamento. Aguarde a conclusão…")
-    with st.spinner("Coletando e processando dados…"):
-        with st.status(f'Coletando dados de {estado_busca.upper()}(Até 100 páginas)', expanded=True) as status:
-            st.write('Iniciando Scraping')
-
-            df = scrape(estado_busca)
-
-            if df is not None and not df.empty:
-                st.write('Processando preços por m² ...')
-                df = calcular_preco_m2(df)
-                df['estado'] = estado_busca
-                df['user_id'] = user.id
-                df['criado_em'] = datetime.now(timezone.utc).isoformat()
-
-                # Tipos numéricos coerentes com o banco
-                df['m2'] = pd.to_numeric(df['m2'], errors='coerce').round(0).astype('Int64')
-                df['preco_num'] = pd.to_numeric(df['preco_num'], errors='coerce')
-                df['preco_m2'] = pd.to_numeric(df['preco_m2'], errors='coerce')
-
-                # Remove NaN/Inf de forma confiável para JSON (compatível com pandas 3.x)
-                df = df.replace([np.inf, -np.inf], np.nan)
-                df = df.astype(object)
-                df = df.where(pd.notna(df), None)
-
-                try:
-                    supabase.table('imoveis').delete().eq('user_id', user.id).eq('estado', estado_busca).execute()
-                    supabase.table('imoveis').insert(df.to_dict(orient='records')).execute()
-
-                    resumo_pesquisa = {
-                        "user_id": user.id,
-                        "estado": estado_busca,
-                        "criado_em": datetime.now(timezone.utc).isoformat(),
-                        "qtd_anuncios": int(len(df)),
-                        "mediana_preco_m2": float(df['preco_m2'].median()) if 'preco_m2' in df.columns else None,
-                        "mediana_preco_total": float(df['preco_num'].median()) if 'preco_num' in df.columns else None,
-                    }
-                    try:
-                        supabase.table('pesquisas').insert(resumo_pesquisa).execute()
-                    except Exception as historico_erro:
-                        st.warning(f'Não foi possível salvar o histórico da pesquisa: {historico_erro}')
-
-                    status.update(label='Concluído!', state='complete', expanded=False)
-                    st.session_state["buscando_dados"] = False
-                    st.rerun()
-                except Exception as e:
-                    status.update(label='Erro ao salvar no banco.', state='error')
-                    st.session_state["buscando_dados"] = False
-                    st.error(f'Erro ao salvar no Supabase: {e}')
-            else:
-                status.update(label="Erro ou nenhum dado encontrado.", state="error")
-                st.session_state["buscando_dados"] = False
 
 try:
     resposta = supabase.table('imoveis').select('*').eq('user_id', user.id).eq('estado', estado_selecionado).execute()
@@ -191,7 +121,7 @@ try:
                             tabela_filtrada['preco_m2'].between(faixa_m2[0], faixa_m2[1])
                         ]
         with col_filtro2:
-            # filtro cidades
+            # filtro bairros
             bairros_diponiveis = sorted(tabela_filtrada['bairro'].unique().astype(str))
             filtro_bairros = st.multiselect('2. Comparar por bairros', bairros_diponiveis)
 
@@ -431,6 +361,67 @@ try:
                 else:
                     st.info('Histórico indisponível: campo criado_em não encontrado.')
 
+            st.subheader('Histórico Temporal (por região)')
+            try:
+                if 'criado_em' in tabela.columns:
+                    data_inicio, data_fim = st.date_input(
+                        'Período',
+                        value=(datetime.now().date(), datetime.now().date()),
+                        help='Selecione o período para analisar a evolução temporal.'
+                    )
+                else:
+                    data_inicio, data_fim = (None, None)
+
+                fonte_disponivel = sorted(tabela.get('fonte', pd.Series()).dropna().unique().tolist())
+                filtro_fonte = st.multiselect('Filtrar por fonte', fonte_disponivel) if fonte_disponivel else []
+
+                query_historico = supabase.table('imoveis_historico').select('*').eq('user_id', user.id).eq('estado', estado_selecionado)
+
+                if data_inicio and data_fim:
+                    query_historico = query_historico.gte('criado_em', f"{data_inicio}T00:00:00Z").lte('criado_em', f"{data_fim}T23:59:59Z")
+
+                if filtro_cidade:
+                    query_historico = query_historico.in_('cidade', filtro_cidade)
+
+                if filtro_bairros:
+                    query_historico = query_historico.in_('bairro', filtro_bairros)
+
+                if filtro_fonte:
+                    query_historico = query_historico.in_('fonte', filtro_fonte)
+
+                historico_resp = query_historico.execute()
+                historico_dados = historico_resp.data or []
+
+                if historico_dados:
+                    historico_df = pd.DataFrame(historico_dados)
+                    historico_df['criado_em'] = pd.to_datetime(historico_df['criado_em'], errors='coerce')
+                    historico_df = historico_df.dropna(subset=['criado_em'])
+                    historico_df['dia'] = historico_df['criado_em'].dt.date
+
+                    historico_agg = (
+                        historico_df.groupby('dia')
+                        .agg(
+                            mediana_m2=('preco_m2', 'median'),
+                            mediana_preco=('preco_num', 'median'),
+                            anuncios=('dia', 'size')
+                        )
+                        .reset_index()
+                        .sort_values('dia')
+                    )
+
+                    col_hist1, col_hist2 = st.columns(2)
+                    with col_hist1:
+                        st.caption('Evolução da mediana (R$/m²)')
+                        st.line_chart(historico_agg.set_index('dia')[['mediana_m2']])
+
+                    with col_hist2:
+                        st.caption('Quantidade de imóveis ao longo do tempo')
+                        st.line_chart(historico_agg.set_index('dia')[['anuncios']])
+                else:
+                    st.info('Sem dados históricos para o período e filtros selecionados.')
+            except Exception as historico_erro:
+                st.info(f'Histórico temporal indisponível: {historico_erro}')
+
             st.subheader('Histórico de Pesquisas')
             try:
                 historico_pesquisas = (
@@ -521,13 +512,14 @@ try:
                         "cidade": st.column_config.TextColumn("Cidade"),
                         "bairro": st.column_config.TextColumn("Bairro"),
                         "estado": st.column_config.TextColumn("UF"),
+                        "fonte": st.column_config.TextColumn("Fonte"),
                         "link": st.column_config.LinkColumn("Link"),
                     },
                 )
 
                 csv_export = tabela_exibir.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label='⬇️ Baixar CSV filtrado',
+                    label='⬇️ Exportar CSV filtrado',
                     data=csv_export,
                     file_name='imoveis_filtrados.csv',
                     mime='text/csv'
@@ -536,8 +528,7 @@ try:
         else:
             st.warning("Nenhum dado encontrado para essa combinação de filtros.")
     else:
-        if not st.session_state.get("buscando_dados"):
-            st.info('👈 Selecione um estado na barra lateral e clique em "Buscar Dados" para começar.')
+        st.info('Ainda não há dados coletados para este estado. Aguarde a próxima coleta automática.')
 except Exception as e:
     st.error(f'Erro ao consultar dados no Supabase: {e}')
 
