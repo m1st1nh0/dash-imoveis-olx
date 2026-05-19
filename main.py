@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import numpy as np
 import pandas as pd
@@ -65,8 +65,11 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 # seleção e filtro de dados
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
 
+def _base_query(table_name: str):
+    return supabase.table(table_name).select('*').is_('user_id', 'null').eq('estado', estado_selecionado)
+
 try:
-    resposta = supabase.table('imoveis').select('*').eq('user_id', user.id).eq('estado', estado_selecionado).execute()
+    resposta = _base_query('imoveis').execute()
     dados = resposta.data or []
     if dados:
         tabela = pd.DataFrame(dados)
@@ -364,9 +367,10 @@ try:
             st.subheader('Histórico Temporal (por região)')
             try:
                 if 'criado_em' in tabela.columns:
+                    hoje = datetime.now().date()
                     data_inicio, data_fim = st.date_input(
                         'Período',
-                        value=(datetime.now().date(), datetime.now().date()),
+                        value=(hoje - timedelta(days=30), hoje),
                         help='Selecione o período para analisar a evolução temporal.'
                     )
                 else:
@@ -375,7 +379,7 @@ try:
                 fonte_disponivel = sorted(tabela.get('fonte', pd.Series()).dropna().unique().tolist())
                 filtro_fonte = st.multiselect('Filtrar por fonte', fonte_disponivel) if fonte_disponivel else []
 
-                query_historico = supabase.table('imoveis_historico').select('*').eq('user_id', user.id).eq('estado', estado_selecionado)
+                query_historico = supabase.table('imoveis_historico').select('*').is_('user_id', 'null').eq('estado', estado_selecionado)
 
                 if data_inicio and data_fim:
                     query_historico = query_historico.gte('criado_em', f"{data_inicio}T00:00:00Z").lte('criado_em', f"{data_fim}T23:59:59Z")
@@ -427,7 +431,7 @@ try:
                 historico_pesquisas = (
                     supabase.table('pesquisas')
                     .select('*')
-                    .eq('user_id', user.id)
+                    .is_('user_id', 'null')
                     .order('criado_em', desc=True)
                     .execute()
                 )
