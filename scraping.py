@@ -21,19 +21,29 @@ def _parse_m2(area_value):
     if area_value is None:
         return None
     try:
-        return float(str(area_value).replace(".", "").replace(",", "."))
+        area = float(str(area_value).replace(".", "").replace(",", "."))
+        return area if area > 0 else None
     except Exception:
         return None
 
 
-def scrape_olx(estado):
+def _normalize_preco_text(preco_texto: str) -> str:
+    if not preco_texto:
+        return "R$ 0"
+    texto = preco_texto.strip()
+    if "confira" in texto.lower() or "sob consulta" in texto.lower():
+        return "R$ 0"
+    return texto
+
+
+def scrape_olx(estado, max_paginas=100):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
     scraper = cloudscraper.create_scraper()
-    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': []}
+    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': [], 'fonte': []}
 
-    for i in range(1, 100):
+    for i in range(1, max_paginas + 1):
         url = f'https://www.olx.com.br/imoveis/venda/estado-{estado}?lis=home_body_search_bar_1001&o={i}'
         pagina_carregada = False
         tentativas = 0
@@ -43,14 +53,14 @@ def scrape_olx(estado):
             try:
                 response = scraper.get(url, headers=headers, timeout=20)
                 if response.status_code != 200:
-                    time.sleep(1 + random.random())
+                    time.sleep(0.6 + random.random())
                     continue
 
                 soup = BeautifulSoup(response.content, 'html.parser')
                 produtos = soup.find_all('section', class_=re.compile('olx-adcard'))
 
                 if not produtos:
-                    time.sleep(1 + random.random())
+                    time.sleep(0.6 + random.random())
                     continue
 
                 pagina_carregada = True
@@ -65,16 +75,15 @@ def scrape_olx(estado):
 
                         # pegar preço
                         preco_tag = (produto.find('h3', class_=re.compile('olx-adcard__price')))
-                        if preco_tag:
-                            preco = preco_tag.get_text().strip()
-                        else:
-                            preco = "R$ 0"
+                        preco = preco_tag.get_text().strip() if preco_tag else "R$ 0"
+                        preco = _normalize_preco_text(preco)
 
                         # pegar m²
                         m2_div = produto.find('div', attrs={'aria-label': re.compile('metros')})
                         if m2_div:
-                            texto_m2 = m2_div.get('aria-label')
-                            m2 = int(re.search(r'\d+', texto_m2).group())
+                            texto_m2 = m2_div.get('aria-label') or ""
+                            match = re.search(r'\d+', texto_m2)
+                            m2 = int(match.group()) if match else None
                         else:
                             m2 = None
 
@@ -108,6 +117,7 @@ def scrape_olx(estado):
                         dic_produtos['cidade'].append(cidade)
                         dic_produtos['bairro'].append(bairro)
                         dic_produtos['link'].append(link)
+                        dic_produtos['fonte'].append('olx')
 
                     except Exception as e:
                         print(f"Erro ao ler o produto: {e}")
@@ -115,14 +125,14 @@ def scrape_olx(estado):
 
             except Exception as e:
                 print(f"Erro ao carregar página {i}: {e}")
-                time.sleep(1 + random.random())
+                time.sleep(0.6 + random.random())
                 continue
 
         if not pagina_carregada:
             print(f"Fim das páginas encontradas na página {i - 1}.")
             break
 
-        time.sleep(0.8 + random.random() * 1.5)
+        time.sleep(0.4 + random.random() * 1.0)
 
     if len(dic_produtos['nome']) > 0:
         return pd.DataFrame(dic_produtos)
@@ -132,7 +142,7 @@ def scrape_olx(estado):
 
 def scrape_chaves(estado, max_paginas=100):
     scraper = cloudscraper.create_scraper()
-    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': []}
+    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': [], 'fonte': []}
 
     pagina = 1
     total_paginas = None
@@ -150,12 +160,12 @@ def scrape_chaves(estado, max_paginas=100):
             try:
                 resp = scraper.get(url, timeout=20)
                 if resp.status_code != 200:
-                    time.sleep(1 + random.random())
+                    time.sleep(0.6 + random.random())
                     continue
                 data = resp.json()
                 sucesso = True
             except Exception:
-                time.sleep(1 + random.random())
+                time.sleep(0.6 + random.random())
 
         if not sucesso:
             break
@@ -189,12 +199,13 @@ def scrape_chaves(estado, max_paginas=100):
             dic_produtos["cidade"].append(cidade)
             dic_produtos["bairro"].append(bairro)
             dic_produtos["link"].append(link)
+            dic_produtos["fonte"].append('chaves')
 
         pagina += 1
         if total_paginas is not None and pagina > total_paginas:
             break
 
-        time.sleep(0.6 + random.random())
+        time.sleep(0.4 + random.random())
 
     if len(dic_produtos['nome']) > 0:
         return pd.DataFrame(dic_produtos)
@@ -202,9 +213,9 @@ def scrape_chaves(estado, max_paginas=100):
     return None
 
 
-def scrape(estado):
-    df_olx = scrape_olx(estado)
-    df_chaves = scrape_chaves(estado)
+def scrape(estado, max_paginas=100):
+    df_olx = scrape_olx(estado, max_paginas=max_paginas)
+    df_chaves = scrape_chaves(estado, max_paginas=max_paginas)
 
     frames = []
     if df_olx is not None and not df_olx.empty:
