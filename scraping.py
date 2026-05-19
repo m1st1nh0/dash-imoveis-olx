@@ -6,7 +6,27 @@ import random
 import time
 
 
-def scrape(estado):
+def _format_brl(value):
+    try:
+        valor = float(value)
+    except Exception:
+        return "R$ 0"
+    if valor <= 0:
+        return "R$ 0"
+    # Formata para pt-BR: 1.234.567,89
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _parse_m2(area_value):
+    if area_value is None:
+        return None
+    try:
+        return float(str(area_value).replace(".", "").replace(",", "."))
+    except Exception:
+        return None
+
+
+def scrape_olx(estado):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
@@ -48,7 +68,7 @@ def scrape(estado):
                         if preco_tag:
                             preco = preco_tag.get_text().strip()
                         else:
-                            preco = "0"
+                            preco = "R$ 0"
 
                         # pegar m²
                         m2_div = produto.find('div', attrs={'aria-label': re.compile('metros')})
@@ -106,5 +126,93 @@ def scrape(estado):
 
     if len(dic_produtos['nome']) > 0:
         return pd.DataFrame(dic_produtos)
+
+    return None
+
+
+def scrape_chaves(estado, max_paginas=100):
+    scraper = cloudscraper.create_scraper()
+    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': []}
+
+    pagina = 1
+    total_paginas = None
+
+    while True:
+        url = (
+            'https://www.chavesnamao.com.br/api/realestate/listing/items/'
+            f'?level1=imoveis-a-venda&level2={estado}&pg={pagina}&server=0&viewport=desktop'
+        )
+
+        tentativas = 0
+        sucesso = False
+        while tentativas < 3 and not sucesso:
+            tentativas += 1
+            try:
+                resp = scraper.get(url, timeout=20)
+                if resp.status_code != 200:
+                    time.sleep(1 + random.random())
+                    continue
+                data = resp.json()
+                sucesso = True
+            except Exception:
+                time.sleep(1 + random.random())
+
+        if not sucesso:
+            break
+
+        if total_paginas is None:
+            total_paginas = data.get("metadata", {}).get("totalPages", max_paginas)
+            total_paginas = min(total_paginas, max_paginas)
+
+        itens = data.get("items", [])
+        if not any(item.get("id") for item in itens):
+            break
+
+        for item in itens:
+            if not item.get("id"):
+                continue
+
+            nome = item.get("title", "")
+            raw_preco = item.get("prices", {}).get("rawPrice")
+            preco = _format_brl(raw_preco)
+
+            area = item.get("area", {})
+            m2 = _parse_m2(area.get("useful") or area.get("total"))
+
+            cidade = item.get("location", {}).get("city", {}).get("name", "")
+            bairro = item.get("location", {}).get("neighborhood", {}).get("name", "")
+            link = "https://www.chavesnamao.com.br" + item.get("url", "")
+
+            dic_produtos["nome"].append(nome)
+            dic_produtos["preco"].append(preco)
+            dic_produtos["m2"].append(m2)
+            dic_produtos["cidade"].append(cidade)
+            dic_produtos["bairro"].append(bairro)
+            dic_produtos["link"].append(link)
+
+        pagina += 1
+        if total_paginas is not None and pagina > total_paginas:
+            break
+
+        time.sleep(0.6 + random.random())
+
+    if len(dic_produtos['nome']) > 0:
+        return pd.DataFrame(dic_produtos)
+
+    return None
+
+
+def scrape(estado):
+    df_olx = scrape_olx(estado)
+    df_chaves = scrape_chaves(estado)
+
+    frames = []
+    if df_olx is not None and not df_olx.empty:
+        frames.append(df_olx)
+    if df_chaves is not None and not df_chaves.empty:
+        frames.append(df_chaves)
+
+    if frames:
+        return pd.concat(frames, ignore_index=True)
 
     return None
