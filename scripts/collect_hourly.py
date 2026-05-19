@@ -1,10 +1,16 @@
 import os
+import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from supabase import create_client
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 from calcular_preco_m2 import calcular_preco_m2
 from scraping import scrape
