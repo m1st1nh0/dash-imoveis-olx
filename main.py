@@ -748,7 +748,7 @@ with col_coleta2:
                 st.error(f"❌ Erro na coleta: {str(e)}")
 
 with col_coleta3:
-    if st.button("🗑️ Limpar Dados", use_container_width=True):
+    if st.button("🗑️ Limpar Dados", use_container_width=True, key="btn_limpar_dados"):
         if st.session_state.get("confirm_delete"):
             try:
                 # ⚠️ Usa o client administrativo (service_role) para escrita
