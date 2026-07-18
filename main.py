@@ -7,50 +7,22 @@ from supabase import create_client
 
 st.set_page_config(page_title="Dashboard", layout="wide")
 
+
+# ⚠️ Dois clients: um público (leitura) e um administrativo (escrita)
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
+supabase_admin = create_client(
+    st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+)
 
-
-def auth_screen():
-    st.title("🔐 Login")
-    tab_login, tab_signup = st.tabs(["Entrar", "Cadastrar"])
-
-    with tab_login:
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Senha", type="password", key="login_pass")
-        if st.button("Entrar"):
-            try:
-                res = supabase.auth.sign_in_with_password(
-                    {"email": email, "password": password}
-                )
-                st.session_state["user"] = res.user
-                st.success("Login realizado!")
-                st.rerun()
-            except Exception:
-                st.error("Erro ao realizar login")
-
-    with tab_signup:
-        email = st.text_input("Email", key="signup_email")
-        password = st.text_input("Senha", type="password", key="signup_pass")
-        if st.button("Cadastrar"):
-            try:
-                supabase.auth.sign_up({"email": email, "password": password})
-                st.success("Conta criada! Realize o login.")
-            except Exception:
-                st.error("Erro ao cadastrar")
-
-
-if "user" not in st.session_state:
-    auth_screen()
-    st.stop()
-
-user = st.session_state["user"]
 
 # título
 st.title("📊 Dashboard Imobiliário")
 st.caption("Dados atualizados automaticamente de hora em hora via coleta agendada.")
 
+
 # Lateral
 st.sidebar.header("Configurações da Coleta")
+
 
 lista_estados = [
     "ac",
@@ -185,7 +157,6 @@ try:
             if "preco_m2" in tabela_final.columns:
                 mediana_selecao = tabela_final["preco_m2"].median()
                 col2.metric("Mediana Preço/m² (Seleção)", f"R$ {mediana_selecao:.2f}")
-            # Graficos
 
             if "preco_num" in tabela_final.columns:
                 mediana_preco = tabela_final["preco_num"].median()
@@ -677,6 +648,7 @@ try:
 except Exception as e:
     st.error(f"Erro ao consultar dados no Supabase: {e}")
 
+
 # SEÇÃO DE COLETA MANUAL
 st.divider()
 col_coleta1, col_coleta2, col_coleta3 = st.columns([2, 1, 1])
@@ -694,10 +666,8 @@ with col_coleta2:
                 df = scrape(estado_selecionado, max_paginas=30)
 
                 if df is not None and not df.empty:
-                    # Processar dados
                     df["estado"] = estado_selecionado.upper()
 
-                    # Converter preços com segurança
                     df["preco_num"] = df["preco"].apply(
                         lambda x: (
                             float(
@@ -711,7 +681,6 @@ with col_coleta2:
                         )
                     )
 
-                    # Calcular preço/m² com validação
                     def calc_preco_m2(row):
                         try:
                             preco = row.get("preco_num")
@@ -724,12 +693,11 @@ with col_coleta2:
 
                             resultado = preco / m2
 
-                            # Validar se é um número válido
                             if math.isnan(resultado) or math.isinf(resultado):
                                 return None
 
                             return round(resultado, 2)
-                        except:
+                        except Exception:
                             return None
 
                     df["preco_m2"] = df.apply(calc_preco_m2, axis=1)
@@ -737,10 +705,8 @@ with col_coleta2:
                     df["criado_em"] = datetime.now(timezone.utc).isoformat()
                     df["user_id"] = None
 
-                    # Remover duplicatas ANTES de converter
                     df = df.drop_duplicates(subset=["link"], keep="first")
 
-                    # Converter NaN e inf para None
                     def clean_value(val):
                         if val is None:
                             return None
@@ -752,15 +718,12 @@ with col_coleta2:
                             pass
                         return val
 
-                    # Aplicar limpeza em todas as colunas numéricas
                     for col in df.columns:
                         if df[col].dtype in ["float64", "float32"]:
                             df[col] = df[col].apply(clean_value)
 
-                    # Salvar no Supabase
                     dados = df.to_dict("records")
 
-                    # Validar cada registro antes de inserir
                     dados_limpos = []
                     for record in dados:
                         record_limpo = {}
@@ -774,7 +737,8 @@ with col_coleta2:
                                 record_limpo[k] = v
                         dados_limpos.append(record_limpo)
 
-                    supabase.table("imoveis").insert(dados_limpos).execute()
+                    # ⚠️ Usa o client administrativo (service_role) para escrita
+                    supabase_admin.table("imoveis").insert(dados_limpos).execute()
 
                     st.success(f"✅ {len(df)} imóveis coletados e salvos!")
                     st.rerun()
@@ -782,11 +746,13 @@ with col_coleta2:
                     st.warning("⚠️ Nenhum dado coletado")
             except Exception as e:
                 st.error(f"❌ Erro na coleta: {str(e)}")
+
 with col_coleta3:
     if st.button("🗑️ Limpar Dados", use_container_width=True):
         if st.session_state.get("confirm_delete"):
             try:
-                supabase.table("imoveis").delete().eq(
+                # ⚠️ Usa o client administrativo (service_role) para escrita
+                supabase_admin.table("imoveis").delete().eq(
                     "estado", estado_selecionado.upper()
                 ).execute()
                 st.success("✅ Dados deletados!")
@@ -799,6 +765,3 @@ with col_coleta3:
             st.session_state["confirm_delete"] = True
 
 st.divider()
-
-# Adicionar no topo do arquivo (imports):
-from datetime import datetime, timezone
