@@ -241,9 +241,12 @@ def scrape_chaves(estado, max_paginas=100):
     return None
 
 
-def scrape(estado, max_paginas=100):
+def scrape(estado, max_paginas=2):
     df_olx = scrape_olx(estado, max_paginas=max_paginas)
     df_chaves = scrape_chaves(estado, max_paginas=max_paginas)
+
+    print("OLX linhas:", 0 if df_olx is None else len(df_olx))
+    print("CHAVES linhas:", 0 if df_chaves is None else len(df_chaves))
 
     frames = []
     if df_olx is not None and not df_olx.empty:
