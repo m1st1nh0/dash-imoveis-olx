@@ -1,0 +1,42 @@
+name: Coleta Automática de Imóveis
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # A cada hora, em ponto
+  workflow_dispatch:     # Permite executar manualmente
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: 🚀 Executar scraping
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: python scraping_scheduler.py
+
+      - name: 📊 Registrar resultado
+        if: always()
+        run: echo "Coleta executada em $(date)" >> scraping_log.txt
+
+      - name: 💾 Upload de logs (opcional)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scraping-logs
+          path: scraping_log.txt
+          retention-days: 7
