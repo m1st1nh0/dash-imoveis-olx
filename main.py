@@ -689,7 +689,7 @@ with col_coleta2:
         with st.spinner("🔄 Coletando dados..."):
             try:
                 from scraping import scrape
-                import numpy as np
+                import math
 
                 df = scrape(estado_selecionado, max_paginas=30)
 
@@ -711,36 +711,77 @@ with col_coleta2:
                         )
                     )
 
-                    # Calcular preço/m² e remover NaN
-                    df["preco_m2"] = df.apply(
-                        lambda row: (
-                            round(row["preco_num"] / row["m2"], 2)
-                            if row.get("preco_num") and row.get("m2") and row["m2"] > 0
-                            else None
-                        ),
-                        axis=1,
-                    )
+                    # Calcular preço/m² com validação
+                    def calc_preco_m2(row):
+                        try:
+                            preco = row.get("preco_num")
+                            m2 = row.get("m2")
+
+                            if preco is None or m2 is None:
+                                return None
+                            if m2 <= 0 or preco <= 0:
+                                return None
+
+                            resultado = preco / m2
+
+                            # Validar se é um número válido
+                            if math.isnan(resultado) or math.isinf(resultado):
+                                return None
+
+                            return round(resultado, 2)
+                        except:
+                            return None
+
+                    df["preco_m2"] = df.apply(calc_preco_m2, axis=1)
 
                     df["criado_em"] = datetime.now(timezone.utc).isoformat()
                     df["user_id"] = None
 
-                    # IMPORTANTE: Converter NaN para None para ser JSON compliant
-                    df = df.where(pd.notna(df), None)
-
-                    # Remover duplicatas
+                    # Remover duplicatas ANTES de converter
                     df = df.drop_duplicates(subset=["link"], keep="first")
+
+                    # Converter NaN e inf para None
+                    def clean_value(val):
+                        if val is None:
+                            return None
+                        try:
+                            if isinstance(val, float):
+                                if math.isnan(val) or math.isinf(val):
+                                    return None
+                        except (TypeError, ValueError):
+                            pass
+                        return val
+
+                    # Aplicar limpeza em todas as colunas numéricas
+                    for col in df.columns:
+                        if df[col].dtype in ["float64", "float32"]:
+                            df[col] = df[col].apply(clean_value)
 
                     # Salvar no Supabase
                     dados = df.to_dict("records")
-                    supabase.table("imoveis").insert(dados).execute()
+
+                    # Validar cada registro antes de inserir
+                    dados_limpos = []
+                    for record in dados:
+                        record_limpo = {}
+                        for k, v in record.items():
+                            if isinstance(v, float):
+                                if math.isnan(v) or math.isinf(v):
+                                    record_limpo[k] = None
+                                else:
+                                    record_limpo[k] = v
+                            else:
+                                record_limpo[k] = v
+                        dados_limpos.append(record_limpo)
+
+                    supabase.table("imoveis").insert(dados_limpos).execute()
 
                     st.success(f"✅ {len(df)} imóveis coletados e salvos!")
                     st.rerun()
                 else:
                     st.warning("⚠️ Nenhum dado coletado")
             except Exception as e:
-                st.error(f"❌ Erro na coleta: {e}")
-
+                st.error(f"❌ Erro na coleta: {str(e)}")
 with col_coleta3:
     if st.button("🗑️ Limpar Dados", use_container_width=True):
         if st.session_state.get("confirm_delete"):
