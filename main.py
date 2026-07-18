@@ -13,6 +13,49 @@ supabase = create_client(
 )
 
 
+def _store_auth_session(auth_response):
+    session = getattr(auth_response, "session", None)
+    if not session:
+        return
+    st.session_state["auth_session"] = {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+    }
+
+
+def _restore_auth_session():
+    saved_session = st.session_state.get("auth_session")
+    if not saved_session:
+        return None
+
+    access_token = saved_session.get("access_token")
+    refresh_token = saved_session.get("refresh_token")
+    if not access_token or not refresh_token:
+        st.session_state.pop("auth_session", None)
+        return None
+
+    try:
+        restored = supabase.auth.set_session(access_token, refresh_token)
+        st.session_state["user"] = restored.user
+        _store_auth_session(restored)
+        return restored.user
+    except Exception:
+        st.session_state.pop("auth_session", None)
+        st.session_state.pop("user", None)
+        return None
+
+
+def _logout():
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+    st.session_state.pop("user", None)
+    st.session_state.pop("auth_session", None)
+    st.session_state.pop("ultima_pesquisa_salva", None)
+    st.rerun()
+
+
 def auth_screen():
     st.title("🔐 Login")
     tab_login, tab_signup = st.tabs(["Entrar", "Cadastrar"])
@@ -27,6 +70,7 @@ def auth_screen():
                     "password": password
                 })
                 st.session_state["user"] = res.user
+                _store_auth_session(res)
                 st.success("Login realizado!")
                 st.rerun()
             except Exception:
@@ -47,10 +91,14 @@ def auth_screen():
 
 
 if "user" not in st.session_state:
+    _restore_auth_session()
+
+if "user" not in st.session_state:
     auth_screen()
     st.stop()
 
 user = st.session_state["user"]
+user_id = user.id
 
 # título
 st.title('📊 Dashboard Imobiliário')
@@ -58,6 +106,9 @@ st.caption("Dados atualizados automaticamente de hora em hora via coleta agendad
 
 # Lateral
 st.sidebar.header('Configurações da Coleta')
+st.sidebar.caption(f"Logado como: {getattr(user, 'email', '')}")
+if st.sidebar.button("Sair"):
+    _logout()
 
 lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt", "ms", "mg", "pa", "pb", "pr", "pe",
                  "pi", "rj", "rn", "rs", "ro", "rr", "sc", "sp", "se", "to"]
@@ -65,8 +116,38 @@ lista_estados = ["ac", "al", "ap", "am", "ba", "ce", "df", "es", "go", "ma", "mt
 # seleção e filtro de dados
 estado_selecionado = st.sidebar.selectbox('Escolha o estado da coleta', lista_estados, index=15)
 
+
+def _registrar_pesquisa(estado: str, tabela_pesquisa: pd.DataFrame):
+    if tabela_pesquisa.empty:
+        return
+
+    mediana_m2 = tabela_pesquisa['preco_m2'].median() if 'preco_m2' in tabela_pesquisa.columns else None
+    mediana_total = tabela_pesquisa['preco_num'].median() if 'preco_num' in tabela_pesquisa.columns else None
+    payload = {
+        "user_id": user_id,
+        "estado": estado,
+        "qtd_anuncios": int(len(tabela_pesquisa)),
+        "mediana_preco_m2": float(mediana_m2) if pd.notna(mediana_m2) else None,
+        "mediana_preco_total": float(mediana_total) if pd.notna(mediana_total) else None,
+    }
+    assinatura = (
+        payload["estado"],
+        payload["qtd_anuncios"],
+        payload["mediana_preco_m2"],
+        payload["mediana_preco_total"],
+    )
+    if st.session_state.get("ultima_pesquisa_salva") == assinatura:
+        return
+
+    try:
+        supabase.table('pesquisas').insert(payload).execute()
+        st.session_state["ultima_pesquisa_salva"] = assinatura
+    except Exception:
+        pass
+
+
 def _base_query(table_name: str):
-    return supabase.table(table_name).select('*').is_('user_id', 'null').eq('estado', estado_selecionado)
+    return supabase.table(table_name).select('*').eq('user_id', user_id).eq('estado', estado_selecionado)
 
 try:
     resposta = _base_query('imoveis').execute()
@@ -139,6 +220,7 @@ try:
         # KPIS
         st.divider()
         if not tabela_final.empty:
+            _registrar_pesquisa(estado_selecionado, tabela_final)
             col1, col2, col3 = st.columns(3)
 
             # total de imóveis
@@ -379,7 +461,7 @@ try:
                 fonte_disponivel = sorted(tabela.get('fonte', pd.Series()).dropna().unique().tolist())
                 filtro_fonte = st.multiselect('Filtrar por fonte', fonte_disponivel) if fonte_disponivel else []
 
-                query_historico = supabase.table('imoveis_historico').select('*').is_('user_id', 'null').eq('estado', estado_selecionado)
+                query_historico = supabase.table('imoveis_historico').select('*').eq('user_id', user_id).eq('estado', estado_selecionado)
 
                 if data_inicio and data_fim:
                     query_historico = query_historico.gte('criado_em', f"{data_inicio}T00:00:00Z").lte('criado_em', f"{data_fim}T23:59:59Z")
@@ -431,7 +513,7 @@ try:
                 historico_pesquisas = (
                     supabase.table('pesquisas')
                     .select('*')
-                    .is_('user_id', 'null')
+                    .eq('user_id', user_id)
                     .order('criado_em', desc=True)
                     .execute()
                 )

@@ -48,6 +48,21 @@ Certifique-se de ter o **Python** instalado em sua máquina.
 4.  **Acesse o Dashboard:**
     O Streamlit abrirá automaticamente uma aba no seu navegador (geralmente em `http://localhost:8501`).
 
+## 🔐 Configuração Supabase (Auth + RLS por usuário)
+
+Para usar login e isolamento por usuário:
+
+1. No Supabase, habilite **Email Auth** em `Authentication > Providers`.
+2. No `SQL Editor`, execute `/home/runner/work/dash-imoveis-olx/dash-imoveis-olx/supabase_setup.sql`.
+3. Configure os secrets do Streamlit:
+   ```toml
+   SUPABASE_URL="https://<seu-projeto>.supabase.co"
+   SUPABASE_ANON_KEY="<sua-anon-key>"
+   ```
+4. Garanta que as inserções em `imoveis`, `imoveis_historico` e `pesquisas` enviem `user_id` do usuário autenticado (ou usem o default `auth.uid()` definido no SQL).
+
+Com isso, cada usuário autenticado só consegue ler/inserir/atualizar as próprias linhas.
+
 ## 📊 Funcionalidades do Dashboard
 -   **🔍 Seletor de Estado:** Escolha a UF (PR, SP, RJ...) e o scraper busca até 100 páginas de anúncios.
 -   **📈 Comparador de Bairros:** Selecione bairros específicos para ver um gráfico lado a lado dos preços médios.
@@ -72,4 +87,3 @@ Este projeto foi desenvolvido para fins de **estudo e portfólio** em Ciência d
 Gostou do projeto? Vamos nos conectar!
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Perfil-blue?style=flat&logo=linkedin)](https://www.linkedin.com/in/lucas-schamposki/)
-
