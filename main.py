@@ -49,79 +49,6 @@ user = st.session_state["user"]
 st.title("📊 Dashboard Imobiliário")
 st.caption("Dados atualizados automaticamente de hora em hora via coleta agendada.")
 
-# SEÇÃO DE COLETA MANUAL
-st.divider()
-col_coleta1, col_coleta2, col_coleta3 = st.columns([2, 1, 1])
-
-with col_coleta1:
-    st.subheader("⚙️ Gerenciamento de Coleta")
-
-with col_coleta2:
-    if st.button("🔄 Coletar Agora", use_container_width=True):
-        with st.spinner("🔄 Coletando dados..."):
-            try:
-                from scraping import scrape
-
-                df = scrape(estado_selecionado, max_paginas=30)
-
-                if df is not None and not df.empty:
-                    # Processar dados
-                    df["estado"] = estado_selecionado.upper()
-                    df["preco_num"] = df["preco"].apply(
-                        lambda x: (
-                            float(
-                                x.replace("R$", "")
-                                .replace(".", "")
-                                .replace(",", ".")
-                                .strip()
-                            )
-                            if x and x != "R$ 0"
-                            else None
-                        )
-                    )
-                    df["preco_m2"] = df.apply(
-                        lambda row: (
-                            round(row["preco_num"] / row["m2"], 2)
-                            if row["preco_num"] and row["m2"] and row["m2"] > 0
-                            else None
-                        ),
-                        axis=1,
-                    )
-                    df["criado_em"] = datetime.now(timezone.utc).isoformat()
-                    df["user_id"] = None
-
-                    # Salvar no Supabase
-                    dados = df.to_dict("records")
-                    supabase.table("imoveis").insert(dados).execute()
-
-                    st.success(f"✅ {len(df)} imóveis coletados e salvos!")
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Nenhum dado coletado")
-            except Exception as e:
-                st.error(f"❌ Erro na coleta: {e}")
-
-with col_coleta3:
-    if st.button("🗑️ Limpar Dados", use_container_width=True):
-        if st.session_state.get("confirm_delete"):
-            try:
-                supabase.table("imoveis").delete().eq(
-                    "estado", estado_selecionado.upper()
-                ).execute()
-                st.success("✅ Dados deletados!")
-                st.session_state["confirm_delete"] = False
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Erro ao deletar: {e}")
-        else:
-            st.warning("⚠️ Clique novamente para confirmar")
-            st.session_state["confirm_delete"] = True
-
-st.divider()
-
-# Adicionar no topo do arquivo (imports):
-from datetime import datetime, timezone
-
 # Lateral
 st.sidebar.header("Configurações da Coleta")
 
@@ -154,11 +81,6 @@ lista_estados = [
     "se",
     "to",
 ]
-
-# seleção e filtro de dados
-estado_selecionado = st.sidebar.selectbox(
-    "Escolha o estado da coleta", lista_estados, index=15
-)
 # SEÇÃO DE COLETA MANUAL
 st.divider()
 col_coleta1, col_coleta2, col_coleta3 = st.columns([2, 1, 1])
@@ -231,6 +153,11 @@ st.divider()
 
 # Adicionar no topo do arquivo (imports):
 from datetime import datetime, timezone
+
+# seleção e filtro de dados
+estado_selecionado = st.sidebar.selectbox(
+    "Escolha o estado da coleta", lista_estados, index=15
+)
 
 
 def _base_query(table_name: str):
