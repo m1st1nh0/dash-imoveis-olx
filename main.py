@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+import math
 
 import numpy as np
 import pandas as pd
@@ -7,22 +8,16 @@ from supabase import create_client
 
 st.set_page_config(page_title="Dashboard", layout="wide")
 
-
-# ⚠️ Dois clients: um público (leitura) e um administrativo (escrita)
 supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
 supabase_admin = create_client(
-    st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+    st.secrets["SUPABASE_URL"],
+    st.secrets["SUPABASE_SERVICE_ROLE_KEY"],
 )
 
-
-# título
 st.title("📊 Dashboard Imobiliário")
 st.caption("Dados atualizados automaticamente de hora em hora via coleta agendada.")
 
-
-# Lateral
 st.sidebar.header("Configurações da Coleta")
-
 
 lista_estados = [
     "ac",
@@ -54,10 +49,10 @@ lista_estados = [
     "to",
 ]
 
-
-# seleção e filtro de dados
 estado_selecionado = st.sidebar.selectbox(
-    "Escolha o estado da coleta", lista_estados, index=15
+    "Escolha o estado da coleta",
+    lista_estados,
+    index=15,
 )
 
 
@@ -65,38 +60,108 @@ def _base_query(table_name: str):
     return (
         supabase.table(table_name)
         .select("*")
-        .is_("user_id", "Null")
+        .is_("user_id", "null")
         .eq("estado", estado_selecionado.upper())
     )
+
+
+def _to_float_preco(valor):
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto or texto == "R$ 0":
+        return None
+    try:
+        return float(texto.replace("R$", "").replace(".", "").replace(",", ".").strip())
+    except Exception:
+        return None
+
+
+def _calc_preco_m2(row):
+    try:
+        preco = row.get("preco_num")
+        m2 = row.get("m2")
+
+        if preco is None or m2 is None:
+            return None
+        if pd.isna(preco) or pd.isna(m2):
+            return None
+        if m2 <= 0 or preco <= 0:
+            return None
+
+        resultado = preco / m2
+
+        if pd.isna(resultado) or np.isinf(resultado):
+            return None
+
+        return round(float(resultado), 2)
+    except Exception:
+        return None
+
+
+def _sanitize_dataframe_for_json(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    for col in df.columns:
+        if df[col].dtype.kind in "fc":
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.replace([np.nan, np.inf, -np.inf], None)
+    return df
+
+
+def _records_from_dataframe(df: pd.DataFrame) -> list[dict]:
+    df = _sanitize_dataframe_for_json(df)
+    records = []
+
+    for record in df.to_dict("records"):
+        record_limpo = {}
+        for k, v in record.items():
+            if isinstance(v, (float, np.floating)):
+                if pd.isna(v) or np.isinf(v):
+                    record_limpo[k] = None
+                else:
+                    record_limpo[k] = float(v)
+            else:
+                record_limpo[k] = v
+        records.append(record_limpo)
+
+    return records
 
 
 try:
     resposta = _base_query("imoveis").execute()
     dados = resposta.data or []
+
     if dados:
         tabela = pd.DataFrame(dados)
+
         st.subheader("Filtros da Análise")
         col_filtro1, col_filtro2 = st.columns(2)
 
         with col_filtro1:
-            # filtro cidades
             contagem_cidades = tabela["cidade"].astype(str).value_counts()
             top_10_cidades = contagem_cidades.head(10).index.tolist()
-            todas_cidades = sorted(tabela["cidade"].unique().astype(str))
-            cidades_no_arquivo = top_10_cidades + todas_cidades
+            todas_cidades = sorted(
+                tabela["cidade"].dropna().astype(str).unique().tolist()
+            )
+            cidades_no_arquivo = list(dict.fromkeys(top_10_cidades + todas_cidades))
+
             filtro_cidade = st.multiselect("1. Selecione a cidade", cidades_no_arquivo)
 
-            # aplicar filtro cidade
             if filtro_cidade:
-                tabela_filtrada = tabela[tabela["cidade"].isin(filtro_cidade)]
+                tabela_filtrada = tabela[tabela["cidade"].isin(filtro_cidade)].copy()
             else:
-                tabela_filtrada = tabela
+                tabela_filtrada = tabela.copy()
 
             if "preco_num" in tabela_filtrada.columns:
-                valores_preco = tabela_filtrada["preco_num"].dropna()
+                valores_preco = pd.to_numeric(
+                    tabela_filtrada["preco_num"], errors="coerce"
+                ).dropna()
                 if not valores_preco.empty:
                     minimo_preco = float(valores_preco.min())
                     maximo_preco = float(valores_preco.max())
+
                     if minimo_preco < maximo_preco:
                         faixa_preco = st.slider(
                             "Preço do imóvel (R$)",
@@ -106,16 +171,19 @@ try:
                             step=max((maximo_preco - minimo_preco) / 100, 1.0),
                         )
                         tabela_filtrada = tabela_filtrada[
-                            tabela_filtrada["preco_num"].between(
-                                faixa_preco[0], faixa_preco[1]
-                            )
-                        ]
+                            pd.to_numeric(
+                                tabela_filtrada["preco_num"], errors="coerce"
+                            ).between(faixa_preco[0], faixa_preco[1])
+                        ].copy()
 
             if "preco_m2" in tabela_filtrada.columns:
-                valores_m2 = tabela_filtrada["preco_m2"].dropna()
+                valores_m2 = pd.to_numeric(
+                    tabela_filtrada["preco_m2"], errors="coerce"
+                ).dropna()
                 if not valores_m2.empty:
                     minimo_m2 = float(valores_m2.min())
                     maximo_m2 = float(valores_m2.max())
+
                     if minimo_m2 < maximo_m2:
                         faixa_m2 = st.slider(
                             "Preço por m² (R$)",
@@ -125,42 +193,50 @@ try:
                             step=max((maximo_m2 - minimo_m2) / 100, 1.0),
                         )
                         tabela_filtrada = tabela_filtrada[
-                            tabela_filtrada["preco_m2"].between(
-                                faixa_m2[0], faixa_m2[1]
-                            )
-                        ]
+                            pd.to_numeric(
+                                tabela_filtrada["preco_m2"], errors="coerce"
+                            ).between(faixa_m2[0], faixa_m2[1])
+                        ].copy()
+
         with col_filtro2:
-            # filtro bairros
-            bairros_diponiveis = sorted(tabela_filtrada["bairro"].unique().astype(str))
+            bairros_disponiveis = sorted(
+                tabela_filtrada["bairro"].dropna().astype(str).unique().tolist()
+            )
             filtro_bairros = st.multiselect(
-                "2. Comparar por bairros", bairros_diponiveis
+                "2. Comparar por bairros", bairros_disponiveis
             )
 
-            # aplicar filtro bairros ou não
             if filtro_bairros:
                 tabela_final = tabela_filtrada[
                     tabela_filtrada["bairro"].isin(filtro_bairros)
-                ]
+                ].copy()
                 titulo_grafico = "Comparativo dos Bairros Selecionados"
             else:
-                tabela_final = tabela_filtrada
+                tabela_final = tabela_filtrada.copy()
                 titulo_grafico = "Top 15 Bairros (Geral)"
 
-        # KPIS
         st.divider()
+
         if not tabela_final.empty:
             col1, col2, col3 = st.columns(3)
 
-            # total de imóveis
             col1.metric("Total de Imóveis", len(tabela_final))
 
             if "preco_m2" in tabela_final.columns:
-                mediana_selecao = tabela_final["preco_m2"].median()
-                col2.metric("Mediana Preço/m² (Seleção)", f"R$ {mediana_selecao:.2f}")
+                mediana_selecao = pd.to_numeric(
+                    tabela_final["preco_m2"], errors="coerce"
+                ).median()
+                if pd.notna(mediana_selecao):
+                    col2.metric(
+                        "Mediana Preço/m² (Seleção)", f"R$ {mediana_selecao:.2f}"
+                    )
 
             if "preco_num" in tabela_final.columns:
-                mediana_preco = tabela_final["preco_num"].median()
-                col3.metric("Preço Mediano do Imóvel", f"R$ {mediana_preco:,.2f}")
+                mediana_preco = pd.to_numeric(
+                    tabela_final["preco_num"], errors="coerce"
+                ).median()
+                if pd.notna(mediana_preco):
+                    col3.metric("Preço Mediano do Imóvel", f"R$ {mediana_preco:,.2f}")
 
             st.subheader("Insights & Qualidade dos Dados")
             insight_tab1, insight_tab2, insight_tab3 = st.tabs(
@@ -199,7 +275,7 @@ try:
                     .rename("anuncios")
                     .reset_index()
                 )
-                st.dataframe(ranking_bairros, use_container_width=True, hide_index=True)
+                st.dataframe(ranking_bairros, width="stretch", hide_index=True)
 
             with insight_tab2:
                 st.caption("Bairros com preço/m² abaixo da mediana da cidade")
@@ -224,9 +300,10 @@ try:
                 oportunidades["diff_percentual"] = oportunidades[
                     "diff_percentual"
                 ].round(2)
+
                 st.dataframe(
                     oportunidades,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         "cidade": st.column_config.TextColumn("Cidade"),
@@ -247,6 +324,7 @@ try:
                 total_registros = len(tabela_final)
                 if total_registros > 0:
                     col_q1, col_q2, col_q3, col_q4 = st.columns(4)
+
                     faltando_m2 = (
                         tabela_final["m2"].isna().mean() * 100
                         if "m2" in tabela_final.columns
@@ -267,6 +345,7 @@ try:
                         if "preco_num" in tabela_final.columns
                         else 0
                     )
+
                     col_q1.metric("% sem m²", f"{faltando_m2:.1f}%")
                     col_q2.metric("% sem bairro", f"{faltando_bairro:.1f}%")
                     col_q3.metric("% sem cidade", f"{faltando_cidade:.1f}%")
@@ -280,14 +359,26 @@ try:
             with avanc_tab1:
                 st.caption("Segmentação simples por faixa de preço/m² (quantis)")
                 tabela_segmento = tabela_final.copy()
+
                 if "preco_m2" in tabela_segmento.columns:
-                    valores_segmento = tabela_segmento["preco_m2"].dropna()
+                    valores_segmento = pd.to_numeric(
+                        tabela_segmento["preco_m2"], errors="coerce"
+                    ).dropna()
+
                     if valores_segmento.nunique() >= 3:
+                        tabela_segmento["preco_m2"] = pd.to_numeric(
+                            tabela_segmento["preco_m2"], errors="coerce"
+                        )
+                        tabela_segmento["preco_num"] = pd.to_numeric(
+                            tabela_segmento["preco_num"], errors="coerce"
+                        )
+
                         tabela_segmento["segmento"] = pd.qcut(
                             tabela_segmento["preco_m2"],
                             q=3,
                             labels=["Baixo", "Médio", "Alto"],
                         )
+
                         resumo_segmento = (
                             tabela_segmento.groupby("segmento")
                             .agg(
@@ -297,9 +388,10 @@ try:
                             )
                             .reset_index()
                         )
+
                         st.dataframe(
                             resumo_segmento,
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                             column_config={
                                 "segmento": st.column_config.TextColumn("Segmento"),
@@ -323,6 +415,9 @@ try:
                 suspeitos["motivo"] = ""
 
                 if "preco_m2" in suspeitos.columns:
+                    suspeitos["preco_m2"] = pd.to_numeric(
+                        suspeitos["preco_m2"], errors="coerce"
+                    )
                     p05_m2 = suspeitos["preco_m2"].quantile(0.05)
                     p95_m2 = suspeitos["preco_m2"].quantile(0.95)
                     suspeitos.loc[
@@ -333,6 +428,9 @@ try:
                     ] += "Preço/m² muito alto; "
 
                 if "preco_num" in suspeitos.columns:
+                    suspeitos["preco_num"] = pd.to_numeric(
+                        suspeitos["preco_num"], errors="coerce"
+                    )
                     p05_preco = suspeitos["preco_num"].quantile(0.05)
                     p95_preco = suspeitos["preco_num"].quantile(0.95)
                     suspeitos.loc[
@@ -343,6 +441,7 @@ try:
                     ] += "Preço total muito alto; "
 
                 if "m2" in suspeitos.columns:
+                    suspeitos["m2"] = pd.to_numeric(suspeitos["m2"], errors="coerce")
                     p05_area = suspeitos["m2"].quantile(0.05)
                     p95_area = suspeitos["m2"].quantile(0.95)
                     suspeitos.loc[
@@ -352,8 +451,7 @@ try:
                         suspeitos["m2"] > p95_area, "motivo"
                     ] += "Área muito alta; "
 
-                suspeitos = suspeitos[suspeitos["motivo"].str.strip() != ""]
-                suspeitos = suspeitos.head(20)
+                suspeitos = suspeitos[suspeitos["motivo"].str.strip() != ""].head(20)
 
                 if not suspeitos.empty:
                     st.dataframe(
@@ -369,7 +467,7 @@ try:
                                 "link",
                             ]
                         ],
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "nome": st.column_config.TextColumn("Imóvel"),
@@ -417,7 +515,7 @@ try:
                         )
                         st.dataframe(
                             historico_agg,
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True,
                             column_config={
                                 "dia": st.column_config.TextColumn("Dia"),
@@ -450,7 +548,10 @@ try:
                     data_inicio, data_fim = (None, None)
 
                 fonte_disponivel = sorted(
-                    tabela.get("fonte", pd.Series()).dropna().unique().tolist()
+                    tabela.get("fonte", pd.Series(dtype="object"))
+                    .dropna()
+                    .unique()
+                    .tolist()
                 )
                 filtro_fonte = (
                     st.multiselect("Filtrar por fonte", fonte_disponivel)
@@ -462,7 +563,7 @@ try:
                     supabase.table("imoveis_historico")
                     .select("*")
                     .is_("user_id", "null")
-                    .eq("estado", estado_selecionado)
+                    .eq("estado", estado_selecionado.upper())
                 )
 
                 if data_inicio and data_fim:
@@ -502,6 +603,7 @@ try:
                     )
 
                     col_hist1, col_hist2 = st.columns(2)
+
                     with col_hist1:
                         st.caption("Evolução da mediana (R$/m²)")
                         st.line_chart(historico_agg.set_index("dia")[["mediana_m2"]])
@@ -522,10 +624,12 @@ try:
                     supabase.table("pesquisas")
                     .select("*")
                     .is_("user_id", "null")
+                    .eq("estado", estado_selecionado.upper())
                     .order("criado_em", desc=True)
                     .execute()
                 )
                 dados_pesquisas = historico_pesquisas.data or []
+
                 if dados_pesquisas:
                     df_pesquisas = pd.DataFrame(dados_pesquisas)
                     df_pesquisas["criado_em"] = pd.to_datetime(
@@ -536,6 +640,7 @@ try:
                     if not df_pesquisas.empty:
                         df_grafico = df_pesquisas.sort_values("criado_em")
                         col_hist1, col_hist2 = st.columns(2)
+
                         with col_hist1:
                             st.caption("Evolução das medianas por pesquisa")
                             colunas_grafico = []
@@ -543,6 +648,7 @@ try:
                                 colunas_grafico.append("mediana_preco_m2")
                             if "mediana_preco_total" in df_grafico.columns:
                                 colunas_grafico.append("mediana_preco_total")
+
                             if colunas_grafico:
                                 st.line_chart(
                                     df_grafico.set_index("criado_em")[colunas_grafico]
@@ -557,7 +663,7 @@ try:
 
                     st.dataframe(
                         df_pesquisas.sort_values("criado_em", ascending=False),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "criado_em": st.column_config.TextColumn("Data"),
@@ -574,13 +680,13 @@ try:
                         },
                     )
                 else:
-                    st.info("Ainda não há histórico de pesquisas para este usuário.")
+                    st.info("Ainda não há histórico de pesquisas para este estado.")
             except Exception as historico_pesquisa_erro:
                 st.info(
                     f"Histórico de pesquisas indisponível: {historico_pesquisa_erro}"
                 )
 
-            st.subheader("visualização Gráfica")
+            st.subheader("Visualização Gráfica")
             tab1, tab2 = st.tabs(["📊 Gráficos", "📄 Dados Detalhados"])
 
             with tab1:
@@ -591,10 +697,9 @@ try:
                     .sort_values(ascending=False)
                 )
 
-                if not filtro_bairros:
-                    dados_grafico_exibir = dados_agrupados.head(15)
-                else:
-                    dados_grafico_exibir = dados_agrupados
+                dados_grafico_exibir = (
+                    dados_agrupados.head(15) if not filtro_bairros else dados_agrupados
+                )
                 st.bar_chart(dados_grafico_exibir)
 
             with tab2:
@@ -615,7 +720,7 @@ try:
 
                 st.dataframe(
                     tabela_exibir,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         "nome": st.column_config.TextColumn("Imóvel"),
@@ -637,19 +742,18 @@ try:
                     data=csv_export,
                     file_name="imoveis_filtrados.csv",
                     mime="text/csv",
+                    width="stretch",
                 )
-
         else:
             st.warning("Nenhum dado encontrado para essa combinação de filtros.")
     else:
         st.info(
             "Ainda não há dados coletados para este estado. Aguarde a próxima coleta automática."
         )
+
 except Exception as e:
     st.error(f"Erro ao consultar dados no Supabase: {e}")
 
-
-# SEÇÃO DE COLETA MANUAL
 st.divider()
 col_coleta1, col_coleta2, col_coleta3 = st.columns([2, 1, 1])
 
@@ -657,11 +761,10 @@ with col_coleta1:
     st.subheader("⚙️ Gerenciamento de Coleta")
 
 with col_coleta2:
-    if st.button("🔄 Coletar Agora", use_container_width=True, key="btn_coletar_agora"):
+    if st.button("🔄 Coletar Agora", width="stretch", key="btn_coletar_agora"):
         with st.spinner("🔄 Coletando dados..."):
             try:
                 from scraping import scrape
-                import math
 
                 df = scrape(estado_selecionado, max_paginas=30)
                 st.write("Resultado bruto da coleta:", None if df is None else len(df))
@@ -669,99 +772,111 @@ with col_coleta2:
                 if df is not None and not df.empty and "fonte" in df.columns:
                     st.write("Fontes encontradas nesta coleta:")
                     st.write(df["fonte"].value_counts())
-                if df is not None and not df.empty:
+
+                if df is None or df.empty:
+                    st.warning("⚠️ Nenhum dado coletado")
+                else:
+                    agora_utc = datetime.now(timezone.utc).isoformat()
+
+                    df = df.copy()
                     df["estado"] = estado_selecionado.upper()
-
-                    df["preco_num"] = df["preco"].apply(
-                        lambda x: (
-                            float(
-                                x.replace("R$", "")
-                                .replace(".", "")
-                                .replace(",", ".")
-                                .strip()
-                            )
-                            if x and x != "R$ 0"
-                            else None
-                        )
-                    )
-
-                    def calc_preco_m2(row):
-                        try:
-                            preco = row.get("preco_num")
-                            m2 = row.get("m2")
-
-                            if preco is None or m2 is None:
-                                return None
-                            if m2 <= 0 or preco <= 0:
-                                return None
-
-                            resultado = preco / m2
-
-                            if math.isnan(resultado) or math.isinf(resultado):
-                                return None
-
-                            return round(resultado, 2)
-                        except Exception:
-                            return None
-
-                    df["preco_m2"] = df.apply(calc_preco_m2, axis=1)
-
-                    df["criado_em"] = datetime.now(timezone.utc).isoformat()
+                    df["preco_num"] = df["preco"].apply(_to_float_preco)
+                    df["preco_m2"] = df.apply(_calc_preco_m2, axis=1)
+                    df["criado_em"] = agora_utc
                     df["user_id"] = None
 
                     df = df.drop_duplicates(subset=["link"], keep="first")
+                    df = _sanitize_dataframe_for_json(df)
 
-                    def clean_value(val):
-                        if val is None:
-                            return None
-                        try:
-                            if isinstance(val, float):
-                                if math.isnan(val) or math.isinf(val):
-                                    return None
-                        except (TypeError, ValueError):
-                            pass
-                        return val
+                    dados_limpos = _records_from_dataframe(df)
 
-                    for col in df.columns:
-                        if df[col].dtype in ["float64", "float32"]:
-                            df[col] = df[col].apply(clean_value)
+                    mediana_preco_m2 = pd.to_numeric(
+                        df["preco_m2"], errors="coerce"
+                    ).median()
+                    mediana_preco_total = pd.to_numeric(
+                        df["preco_num"], errors="coerce"
+                    ).median()
 
-                    dados = df.to_dict("records")
+                    resumo_pesquisa = {
+                        "estado": estado_selecionado.upper(),
+                        "user_id": None,
+                        "criado_em": agora_utc,
+                        "qtd_anuncios": int(len(df)),
+                        "mediana_preco_m2": (
+                            float(mediana_preco_m2)
+                            if pd.notna(mediana_preco_m2)
+                            else None
+                        ),
+                        "mediana_preco_total": (
+                            float(mediana_preco_total)
+                            if pd.notna(mediana_preco_total)
+                            else None
+                        ),
+                    }
 
-                    dados_limpos = []
-                    for record in dados:
-                        record_limpo = {}
-                        for k, v in record.items():
-                            if isinstance(v, float):
-                                if math.isnan(v) or math.isinf(v):
-                                    record_limpo[k] = None
-                                else:
-                                    record_limpo[k] = v
-                            else:
-                                record_limpo[k] = v
-                        dados_limpos.append(record_limpo)
+                    supabase_admin.table("imoveis").delete().eq(
+                        "estado", estado_selecionado.upper()
+                    ).execute()
 
-                    # ⚠️ Usa o client administrativo (service_role) para escrita
                     supabase_admin.table("imoveis").insert(dados_limpos).execute()
+                    supabase_admin.table("imoveis_historico").insert(
+                        dados_limpos
+                    ).execute()
+                    supabase_admin.table("pesquisas").insert(resumo_pesquisa).execute()
 
-                    st.success(f"✅ {len(df)} imóveis coletados e salvos!")
-                    # st.rerun()
-                else:
-                    st.warning("⚠️ Nenhum dado coletado")
+                    st.success(
+                        f"✅ {len(df)} imóveis coletados e salvos em imoveis, "
+                        "imoveis_historico e pesquisas!"
+                    )
+                    st.rerun()
+
             except Exception as e:
                 st.error(f"❌ Erro na coleta: {str(e)}")
 
 with col_coleta3:
-    if st.button("🗑️ Limpar Dados", use_container_width=True, key="btn_limpar_dados"):
+    if st.button("🗑️ Limpar Dados", width="stretch", key="btn_limpar_dados"):
         if st.session_state.get("confirm_delete"):
             try:
-                # ⚠️ Usa o client administrativo (service_role) para escrita
-                supabase_admin.table("imoveis").delete().eq(
-                    "estado", estado_selecionado.upper()
-                ).execute()
-                st.success("✅ Dados deletados!")
+                estado_db = estado_selecionado.upper()
+
+                del_imoveis = (
+                    supabase_admin.table("imoveis")
+                    .delete()
+                    .eq("estado", estado_db)
+                    .select("id, estado")
+                    .execute()
+                )
+
+                del_historico = (
+                    supabase_admin.table("imoveis_historico")
+                    .delete()
+                    .eq("estado", estado_db)
+                    .select("id, estado")
+                    .execute()
+                )
+
+                del_pesquisas = (
+                    supabase_admin.table("pesquisas")
+                    .delete()
+                    .eq("estado", estado_db)
+                    .select("id, estado")
+                    .execute()
+                )
+
+                qtd_imoveis = len(del_imoveis.data or [])
+                qtd_historico = len(del_historico.data or [])
+                qtd_pesquisas = len(del_pesquisas.data or [])
+
+                st.success(
+                    f"✅ Dados removidos do estado {estado_db}: "
+                    f"{qtd_imoveis} em imoveis, "
+                    f"{qtd_historico} em imoveis_historico, "
+                    f"{qtd_pesquisas} em pesquisas."
+                )
+
                 st.session_state["confirm_delete"] = False
                 st.rerun()
+
             except Exception as e:
                 st.error(f"❌ Erro ao deletar: {e}")
         else:
