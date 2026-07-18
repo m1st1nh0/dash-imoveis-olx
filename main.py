@@ -657,7 +657,7 @@ with col_coleta1:
     st.subheader("⚙️ Gerenciamento de Coleta")
 
 with col_coleta2:
-    if st.button("🔄 Coletar Agora", use_container_width=True):
+    if st.button("🔄 Coletar Agora", use_container_width=True, key="btn_coletar_agora"):
         with st.spinner("🔄 Coletando dados..."):
             try:
                 from scraping import scrape
