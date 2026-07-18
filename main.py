@@ -65,8 +65,8 @@ def _base_query(table_name: str):
     return (
         supabase.table(table_name)
         .select("*")
-        .is_("user_id", "null")
-        .eq("estado", estado_selecionado)
+        .is_("user_id", "Null")
+        .eq("estado", estado_selecionado.upper())
     )
 
 
