@@ -38,13 +38,21 @@ def _normalize_preco_text(preco_texto: str) -> str:
 
 def scrape_olx(estado, max_paginas=100):
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
     scraper = cloudscraper.create_scraper()
-    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': [], 'fonte': []}
+    dic_produtos = {
+        "nome": [],
+        "preco": [],
+        "m2": [],
+        "cidade": [],
+        "bairro": [],
+        "link": [],
+        "fonte": [],
+    }
 
     for i in range(1, max_paginas + 1):
-        url = f'https://www.olx.com.br/imoveis/venda/estado-{estado}?lis=home_body_search_bar_1001&o={i}'
+        url = f"https://www.olx.com.br/imoveis/venda/estado-{estado}?lis=home_body_search_bar_1001&o={i}"
         pagina_carregada = False
         tentativas = 0
 
@@ -56,8 +64,8 @@ def scrape_olx(estado, max_paginas=100):
                     time.sleep(0.6 + random.random())
                     continue
 
-                soup = BeautifulSoup(response.content, 'html.parser')
-                produtos = soup.find_all('section', class_=re.compile('olx-adcard'))
+                soup = BeautifulSoup(response.content, "html.parser")
+                produtos = soup.find_all("section", class_=re.compile("olx-adcard"))
 
                 if not produtos:
                     time.sleep(0.6 + random.random())
@@ -68,35 +76,47 @@ def scrape_olx(estado, max_paginas=100):
                 for produto in produtos:
                     try:
                         # pegar nome
-                        nome_tag = produto.find('h2', class_=re.compile('olx-adcard__title'))
+                        nome_tag = produto.find(
+                            "h2", class_=re.compile("olx-adcard__link")
+                        )
                         if not nome_tag:
                             continue
                         nome = nome_tag.get_text().strip()
 
                         # pegar preço
-                        preco_tag = (produto.find('h3', class_=re.compile('olx-adcard__price')))
+                        preco_tag = produto.find(
+                            "h3", class_=re.compile("olx-adcard__price")
+                        )
                         preco = preco_tag.get_text().strip() if preco_tag else "R$ 0"
                         preco = _normalize_preco_text(preco)
 
                         # pegar m²
-                        m2_div = produto.find('div', attrs={'aria-label': re.compile('metros')})
+                        m2_div = produto.find(
+                            "div", attrs={"aria-label": re.compile("metros")}
+                        )
                         if m2_div:
-                            texto_m2 = m2_div.get('aria-label') or ""
-                            match = re.search(r'\d+', texto_m2)
+                            texto_m2 = m2_div.get("aria-label") or ""
+                            match = re.search(r"\d+", texto_m2)
                             m2 = int(match.group()) if match else None
                         else:
                             m2 = None
 
                         # pegar localização
-                        localizacao_tag = (produto.find('p', class_=re.compile('location')))
-                        localizacao = localizacao_tag.get_text().strip() if localizacao_tag else ""
+                        localizacao_tag = produto.find(
+                            "p", class_=re.compile("olx-adcard__location")
+                        )
+                        localizacao = (
+                            localizacao_tag.get_text().strip()
+                            if localizacao_tag
+                            else ""
+                        )
                         if localizacao:
-                            cidade_bairro = localizacao.split(',')
+                            cidade_bairro = localizacao.split(",")
                             if len(cidade_bairro) >= 2:
                                 cidade = cidade_bairro[0]
                                 bairro = cidade_bairro[1]
-                            elif '-' in cidade_bairro:
-                                partes = localizacao.split('-')
+                            elif "-" in cidade_bairro:
+                                partes = localizacao.split("-")
                                 cidade = partes[0]
                                 bairro = partes[1]
                             else:
@@ -107,17 +127,17 @@ def scrape_olx(estado, max_paginas=100):
                             bairro = "Não Informado"
 
                         # pegar link
-                        link_tag = (produto.find('a', class_=re.compile('link')))
-                        link = link_tag.get('href') if link_tag else ""
+                        link_tag = produto.find("a", class_=re.compile("link"))
+                        link = link_tag.get("href") if link_tag else ""
 
                         # adicionar a lista
-                        dic_produtos['nome'].append(nome)
-                        dic_produtos['preco'].append(preco)
-                        dic_produtos['m2'].append(m2)
-                        dic_produtos['cidade'].append(cidade)
-                        dic_produtos['bairro'].append(bairro)
-                        dic_produtos['link'].append(link)
-                        dic_produtos['fonte'].append('olx')
+                        dic_produtos["nome"].append(nome)
+                        dic_produtos["preco"].append(preco)
+                        dic_produtos["m2"].append(m2)
+                        dic_produtos["cidade"].append(cidade)
+                        dic_produtos["bairro"].append(bairro)
+                        dic_produtos["link"].append(link)
+                        dic_produtos["fonte"].append("olx")
 
                     except Exception as e:
                         print(f"Erro ao ler o produto: {e}")
@@ -134,7 +154,7 @@ def scrape_olx(estado, max_paginas=100):
 
         time.sleep(0.4 + random.random() * 1.0)
 
-    if len(dic_produtos['nome']) > 0:
+    if len(dic_produtos["nome"]) > 0:
         return pd.DataFrame(dic_produtos)
 
     return None
@@ -142,15 +162,23 @@ def scrape_olx(estado, max_paginas=100):
 
 def scrape_chaves(estado, max_paginas=100):
     scraper = cloudscraper.create_scraper()
-    dic_produtos = {'nome': [], 'preco': [], 'm2': [], 'cidade': [], 'bairro': [], 'link': [], 'fonte': []}
+    dic_produtos = {
+        "nome": [],
+        "preco": [],
+        "m2": [],
+        "cidade": [],
+        "bairro": [],
+        "link": [],
+        "fonte": [],
+    }
 
     pagina = 1
     total_paginas = None
 
     while True:
         url = (
-            'https://www.chavesnamao.com.br/api/realestate/listing/items/'
-            f'?level1=imoveis-a-venda&level2={estado}&pg={pagina}&server=0&viewport=desktop'
+            "https://www.chavesnamao.com.br/api/realestate/listing/items/"
+            f"?level1=imoveis-a-venda&level2={estado}&pg={pagina}&server=0&viewport=desktop"
         )
 
         tentativas = 0
@@ -199,7 +227,7 @@ def scrape_chaves(estado, max_paginas=100):
             dic_produtos["cidade"].append(cidade)
             dic_produtos["bairro"].append(bairro)
             dic_produtos["link"].append(link)
-            dic_produtos["fonte"].append('chaves')
+            dic_produtos["fonte"].append("chaves")
 
         pagina += 1
         if total_paginas is not None and pagina > total_paginas:
@@ -207,7 +235,7 @@ def scrape_chaves(estado, max_paginas=100):
 
         time.sleep(0.4 + random.random())
 
-    if len(dic_produtos['nome']) > 0:
+    if len(dic_produtos["nome"]) > 0:
         return pd.DataFrame(dic_produtos)
 
     return None
