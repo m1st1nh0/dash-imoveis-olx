@@ -745,7 +745,7 @@ with col_coleta2:
                     supabase_admin.table("imoveis").insert(dados_limpos).execute()
 
                     st.success(f"✅ {len(df)} imóveis coletados e salvos!")
-                    st.rerun()
+                    # st.rerun()
                 else:
                     st.warning("⚠️ Nenhum dado coletado")
             except Exception as e:
