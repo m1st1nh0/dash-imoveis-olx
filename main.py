@@ -664,7 +664,11 @@ with col_coleta2:
                 import math
 
                 df = scrape(estado_selecionado, max_paginas=30)
+                st.write("Resultado bruto da coleta:", None if df is None else len(df))
 
+                if df is not None and not df.empty and "fonte" in df.columns:
+                    st.write("Fontes encontradas nesta coleta:")
+                    st.write(df["fonte"].value_counts())
                 if df is not None and not df.empty:
                     df["estado"] = estado_selecionado.upper()
 
