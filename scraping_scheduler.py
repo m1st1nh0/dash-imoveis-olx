@@ -91,6 +91,9 @@ def calcular_preco_m2(row):
 def salvar_no_supabase(df, estado):
     """Salva dados no Supabase"""
     try:
+        # ✅ CORREÇÃO: substituir NaN por None antes de serializar para JSON
+        df = df.where(pd.notnull(df), None)
+
         # Converter para dicionários
         dados = df.to_dict("records")
 
@@ -101,11 +104,16 @@ def salvar_no_supabase(df, estado):
         registro_pesquisa = {
             "estado": estado.upper(),
             "qtd_anuncios": len(df),
+            # ✅ CORREÇÃO: protege .median() contra NaN
             "mediana_preco_m2": (
-                float(df["preco_m2"].median()) if "preco_m2" in df.columns else None
+                float(df["preco_m2"].median())
+                if "preco_m2" in df.columns and df["preco_m2"].notna().any()
+                else None
             ),
             "mediana_preco_total": (
-                float(df["preco_num"].median()) if "preco_num" in df.columns else None
+                float(df["preco_num"].median())
+                if "preco_num" in df.columns and df["preco_num"].notna().any()
+                else None
             ),
             "criado_em": datetime.now(timezone.utc).isoformat(),
             "user_id": None,
