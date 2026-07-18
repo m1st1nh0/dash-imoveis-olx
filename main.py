@@ -689,12 +689,15 @@ with col_coleta2:
         with st.spinner("🔄 Coletando dados..."):
             try:
                 from scraping import scrape
+                import numpy as np
 
                 df = scrape(estado_selecionado, max_paginas=30)
 
                 if df is not None and not df.empty:
                     # Processar dados
                     df["estado"] = estado_selecionado.upper()
+
+                    # Converter preços com segurança
                     df["preco_num"] = df["preco"].apply(
                         lambda x: (
                             float(
@@ -707,16 +710,25 @@ with col_coleta2:
                             else None
                         )
                     )
+
+                    # Calcular preço/m² e remover NaN
                     df["preco_m2"] = df.apply(
                         lambda row: (
                             round(row["preco_num"] / row["m2"], 2)
-                            if row["preco_num"] and row["m2"] and row["m2"] > 0
+                            if row.get("preco_num") and row.get("m2") and row["m2"] > 0
                             else None
                         ),
                         axis=1,
                     )
+
                     df["criado_em"] = datetime.now(timezone.utc).isoformat()
                     df["user_id"] = None
+
+                    # IMPORTANTE: Converter NaN para None para ser JSON compliant
+                    df = df.where(pd.notna(df), None)
+
+                    # Remover duplicatas
+                    df = df.drop_duplicates(subset=["link"], keep="first")
 
                     # Salvar no Supabase
                     dados = df.to_dict("records")
