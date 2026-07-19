@@ -35,7 +35,7 @@ jobs:
 
       - name: 💾 Upload de logs (opcional)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: scraping-logs
           path: scraping_log.txt
